@@ -1,0 +1,39 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+playwright-report/
+test-results/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime data, backups, and private world repositories
+backups/
+.staging/
+.staging-reports/
+world_repos/*/
+!world_repos/.gitkeep
+world_repos.pre-restore-*/
+
+# Django generated files
+backend/staticfiles/
+
+# Local sync protocol cache
+sync-service/.tldraw-sync/

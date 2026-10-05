@@ -1,0 +1,17 @@
+{
+  "name": "projectoc-sync-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --enable-source-maps src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "@tldraw/sync": "^5.5.2",
+    "@tldraw/sync-core": "^5.5.2",
+    "redis": "^4.7.0",
+    "ws": "^8.18.0"
+  }
+}

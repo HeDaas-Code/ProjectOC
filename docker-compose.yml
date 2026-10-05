@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-projectoc}
+      POSTGRES_USER: ${POSTGRES_USER:-projectoc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-projectoc}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes: [projectoc-postgres:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10 }
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-projectoc-local-change-me}
+    volumes: [projectoc-neo4j:/data]
+    healthcheck:
+      test: ["CMD-SHELL", 'cypher-shell -u neo4j -p "$${NEO4J_AUTH#neo4j/}" "RETURN 1" >/dev/null 2>&1']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-projectoc}:${POSTGRES_PASSWORD:-projectoc}@postgres:5432/${POSTGRES_DB:-projectoc}
+      WORLD_REPOS_ROOT: /app/world_repos
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-projectoc-local-change-me}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+      WORKSPACE_CREDENTIALS_KEY: ${WORKSPACE_CREDENTIALS_KEY:-}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+      SYNC_SERVICE_URL: ${SYNC_SERVICE_URL:-ws://127.0.0.1:8787}
+      SYNC_TICKET_SECRET: ${SYNC_TICKET_SECRET:-projectoc-sync-ticket-local-change-me}
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:-projectoc-sync-local-secret}
+      SYNC_ALLOWED_ORIGINS: ${SYNC_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+      SYNC_REQUIRE_ORIGIN: ${SYNC_REQUIRE_ORIGIN:-0}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+    volumes: [./backend:/app/backend, ./world_repos:/app/world_repos]
+    ports: ["127.0.0.1:${BACKEND_PORT:-8000}:8000"]
+    command: ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    working_dir: /app/backend
+  outbox-worker:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-projectoc}:${POSTGRES_PASSWORD:-projectoc}@postgres:5432/${POSTGRES_DB:-projectoc}
+      WORLD_REPOS_ROOT: /app/world_repos
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-projectoc-local-change-me}
+      OUTBOX_WORKER_INTERVAL: ${OUTBOX_WORKER_INTERVAL:-5}
+      OUTBOX_WORKER_BATCH: ${OUTBOX_WORKER_BATCH:-20}
+      OUTBOX_WORKER_LEASE_SECONDS: ${OUTBOX_WORKER_LEASE_SECONDS:-120}
+      OUTBOX_RETRY_BASE_SECONDS: ${OUTBOX_RETRY_BASE_SECONDS:-5}
+      OUTBOX_RETRY_MAX_SECONDS: ${OUTBOX_RETRY_MAX_SECONDS:-900}
+      OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-12}
+    depends_on:
+      backend: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+    volumes: [./backend:/app/backend, ./world_repos:/app/world_repos]
+    command: ["sh", "-c", "python manage.py run_outbox_worker --loop --interval $${OUTBOX_WORKER_INTERVAL} --limit $${OUTBOX_WORKER_BATCH}"]
+    working_dir: /app/backend
+  sync-service:
+    build: ./sync-service
+    environment:
+      PORT: 8787
+      DJANGO_INTERNAL_URL: http://backend:8000
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:-projectoc-sync-local-secret}
+      SYNC_TICKET_SECRET: ${SYNC_TICKET_SECRET:-projectoc-sync-ticket-local-change-me}
+      SYNC_ALLOWED_ORIGINS: ${SYNC_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+      SYNC_REQUIRE_ORIGIN: ${SYNC_REQUIRE_ORIGIN:-0}
+      SYNC_REDIS_URL: ${SYNC_REDIS_URL:-redis://redis:6379}
+      SYNC_REDIS_PREFIX: ${SYNC_REDIS_PREFIX:-projectoc:sync}
+      SYNC_MAX_ROOM_CLIENTS: ${SYNC_MAX_ROOM_CLIENTS:-50}
+      SYNC_MAX_MESSAGES_PER_WINDOW: ${SYNC_MAX_MESSAGES_PER_WINDOW:-120}
+      # Local HTTP development uses the official TLDraw CRDT by default.
+      # Keep these explicit here because staging-common.sh is not sourced by
+      # ordinary `docker compose up` commands.
+      TLDRAW_SYNC_OFFICIAL_ENABLED: ${TLDRAW_SYNC_OFFICIAL_ENABLED:-1}
+      TLDRAW_SCHEMA_VERSION: ${TLDRAW_SCHEMA_VERSION:-oc-tldraw-2}
+    depends_on:
+      backend: { condition: service_started }
+      redis: { condition: service_healthy }
+    ports: ["127.0.0.1:${SYNC_PORT:-8787}:8787"]
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+      # Vite reads VITE_* values when the dev server starts. Without this
+      # explicit setting the UI silently falls back to records-v1.
+      VITE_TLDRAW_OFFICIAL_SYNC: ${VITE_TLDRAW_OFFICIAL_SYNC:-1}
+      VITE_TLDRAW_LICENSE_KEY: ${VITE_TLDRAW_LICENSE_KEY:-}
+    ports: ["127.0.0.1:${FRONTEND_PORT:-5173}:5173"]
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+volumes:
+  projectoc-neo4j:
+  projectoc-postgres:

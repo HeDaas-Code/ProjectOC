@@ -1,0 +1,45 @@
+{
+  "name": "projectoc-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tiptap/starter-kit": "^3.31.4",
+    "@tiptap/vue-3": "^3.31.4",
+    "@tldraw/sync": "^5.5.2",
+    "@tldraw/tldraw": "^5.5.2",
+    "axios": "^1.8.4",
+    "cytoscape": "^3.34.3",
+    "dompurify": "^3.4.16",
+    "element-plus": "^2.9.8",
+    "katex": "^0.19.0",
+    "marked": "^18.0.14",
+    "mermaid": "^12.1.0",
+    "pinia": "^3.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/cytoscape": "^3.21.9",
+    "@types/katex": "^0.16.8",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-vue": "^5.2.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.5",
+    "vitest": "^3.0.8",
+    "vue-tsc": "^2.2.8"
+  }
+}

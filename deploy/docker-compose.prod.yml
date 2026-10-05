@@ -1,0 +1,76 @@
+# Use together with the root compose file:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+# Put this stack on a private network and mount real TLS files before starting it.
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a unique strong database password}
+
+  neo4j:
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set a unique strong Neo4j password}
+
+  frontend:
+    profiles: [dev]
+
+  backend:
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set a unique long Django secret key}
+      WORKSPACE_CREDENTIALS_KEY: ${WORKSPACE_CREDENTIALS_KEY:?set a stable Fernet key for encrypted workspace credentials}
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?set the private DNS name or IP}
+      DJANGO_SECURE_PROXY_SSL_HEADER: "1"
+      DJANGO_SECURE_SSL_REDIRECT: "0"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set the HTTPS frontend origin}
+      SYNC_SERVICE_URL: ${SYNC_SERVICE_URL:?set the public wss URL, for example wss://oc.example.internal}
+      SYNC_ALLOWED_ORIGINS: ${SYNC_ALLOWED_ORIGINS:?set the HTTPS frontend origin}
+      SYNC_REQUIRE_ORIGIN: "1"
+      SYNC_TICKET_SECRET: ${SYNC_TICKET_SECRET:?set a long random ticket secret}
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:?set a separate long random internal secret}
+      TLDRAW_SYNC_OFFICIAL_ENABLED: "1"
+      TLDRAW_SCHEMA_VERSION: ${TLDRAW_SCHEMA_VERSION:-oc-tldraw-2}
+    ports: !reset []
+
+
+  outbox-worker:
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set the same Django secret as backend}
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?set the private DNS name or IP}
+      OUTBOX_WORKER_INTERVAL: ${OUTBOX_WORKER_INTERVAL:-5}
+      OUTBOX_WORKER_BATCH: ${OUTBOX_WORKER_BATCH:-20}
+      OUTBOX_WORKER_LEASE_SECONDS: ${OUTBOX_WORKER_LEASE_SECONDS:-120}
+      OUTBOX_RETRY_BASE_SECONDS: ${OUTBOX_RETRY_BASE_SECONDS:-5}
+      OUTBOX_RETRY_MAX_SECONDS: ${OUTBOX_RETRY_MAX_SECONDS:-900}
+      OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-12}
+
+  sync-service:
+    environment:
+      SYNC_ALLOWED_ORIGINS: ${SYNC_ALLOWED_ORIGINS:?set the HTTPS frontend origin}
+      SYNC_REQUIRE_ORIGIN: "1"
+      SYNC_TICKET_SECRET: ${SYNC_TICKET_SECRET:?set the same ticket secret as backend}
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:?set the same internal secret as backend}
+      SYNC_REDIS_URL: ${SYNC_REDIS_URL:-redis://redis:6379}
+      SYNC_REDIS_PREFIX: ${SYNC_REDIS_PREFIX:-projectoc:sync}
+    depends_on:
+      backend: { condition: service_started }
+      redis: { condition: service_healthy }
+    ports: !reset []
+
+  edge:
+    build:
+      # Compose resolves paths relative to the first compose file (the repo root).
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        VITE_TLDRAW_LICENSE_KEY: ${VITE_TLDRAW_LICENSE_KEY:-}
+        VITE_TLDRAW_OFFICIAL_SYNC: ${VITE_TLDRAW_OFFICIAL_SYNC:-1}
+    depends_on:
+      backend: { condition: service_started }
+      sync-service: { condition: service_started }
+    ports:
+      - "${HTTPS_BIND:-127.0.0.1:443}:443"
+      - "${HTTP_BIND:-127.0.0.1:80}:80"
+    volumes:
+      - ${TLS_CERT_DIR:?set TLS_CERT_DIR}/fullchain.pem:/etc/nginx/tls/fullchain.pem:ro
+      - ${TLS_CERT_DIR:?set TLS_CERT_DIR}/privkey.pem:/etc/nginx/tls/privkey.pem:ro
