@@ -13,8 +13,8 @@ import { T } from '@tldraw/validate'
 /**
  * Official tldraw sync-core room integration.
  *
- * The legacy records-v1 transport deliberately remains in server.js. This
- * module owns only rooms negotiated as tldraw-sync-v2 and keeps SQLite as a
+ * records-v1 is retired. Historical snapshots may be imported once. This
+ * module owns tldraw-sync-v2 rooms and keeps SQLite as a
  * protocol journal/cache; the caller is responsible for persisting the
  * materialized snapshot to PostgreSQL.
  */
@@ -75,7 +75,7 @@ function legacyToStoreSnapshot(snapshot) {
 export function roomSnapshotToLegacy(snapshot) {
   const store = Object.fromEntries((snapshot?.documents || []).map(({ state }) => [state.id, state]))
   return {
-    // Keep a records-v1-compatible projection for old clients, but preserve
+    // Keep the document projection for domain APIs and exports, and preserve
     // the complete official RoomSnapshot (including tombstones and clocks).
     // The latter is the only source used when an official room is rebuilt.
     official_snapshot: snapshot,
@@ -193,10 +193,18 @@ export class OfficialRoomManager {
     this.onCommittedChanges = onCommittedChanges
     this.logger = logger
     this.rooms = new Map()
+    this.loadingRooms = new Map()
     fs.mkdirSync(dataDir, { recursive: true })
   }
 
   async getRoom(roomKey) {
+    if (this.loadingRooms.has(roomKey)) return this.loadingRooms.get(roomKey)
+    const loading = this.initializeRoom(roomKey)
+    this.loadingRooms.set(roomKey, loading)
+    try { return await loading } finally { this.loadingRooms.delete(roomKey) }
+  }
+
+  async initializeRoom(roomKey) {
     const existing = this.rooms.get(roomKey)
     if (existing) return existing
 

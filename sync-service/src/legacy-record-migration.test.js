@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyOperation, applyOperations, compareVersion, createRecordState, metadataFromRecordState, shapeFieldCategory, shapeMergeStrategy, snapshotFromRecordState } from './record-sync.js'
+import { applyOperation, applyOperations, compareVersion, createRecordState, metadataFromRecordState, shapeFieldCategory, shapeMergeStrategy, snapshotFromRecordState } from './legacy-record-migration.js'
 
 const snapshot = {
   document: { schema: { schemaVersion: 2 }, store: {

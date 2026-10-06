@@ -1,3 +1,5 @@
+/** Frozen records-v1 decoder for importing historical PostgreSQL logs only.
+ * No WebSocket or write endpoint may call this for new edits. */
 /**
  * Deterministic, record-level collaboration protocol for TLDraw document stores.
  *

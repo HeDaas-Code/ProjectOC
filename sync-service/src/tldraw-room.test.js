@@ -177,3 +177,15 @@ test('official room keeps a legacy migration available while PostgreSQL is unava
   assert.equal(state.persistPending.length, 0)
   assert.equal(state.reconciliation, 'matched')
 })
+
+
+test('simultaneous reconnects initialize one room and one SQLite storage', async t => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'projectoc-concurrent-room-'))
+  let loads = 0
+  const manager = new OfficialRoomManager({ dataDir, loadLegacySnapshot: async () => { loads++; await new Promise(resolve => setTimeout(resolve, 10)); return {snapshot: {}} } })
+  t.after(() => { manager.close(); fs.rmSync(dataDir, { recursive: true, force: true }) })
+  const rooms = await Promise.all([manager.getRoom('w:main:c'), manager.getRoom('w:main:c'), manager.getRoom('w:main:c')])
+  assert.equal(loads, 1)
+  assert.equal(rooms[0], rooms[1])
+  assert.equal(rooms[1], rooms[2])
+})
