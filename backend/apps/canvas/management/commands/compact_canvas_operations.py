@@ -2,8 +2,8 @@
 
 Only operations already included in the persisted PostgreSQL snapshot may be
 removed.  This command is intended for maintenance/recovery jobs; the sync
-service still performs best-effort compaction after snapshots in normal
-operation.
+service no longer writes records-v1 operations. Historical logs remain
+readable for migration.
 """
 from __future__ import annotations
 
