@@ -8,6 +8,22 @@
 
 提交前删去模型 API 密钥、Cookie、同步票据、邀请链接和私人世界观内容。不要提交 `.env`、数据库、备份或本地日志。
 
+## 分支与 PR
+
+`main` 是稳定基线。新任务从最新 `origin/main` 创建独立功能分支，Codex 创建的分支使用 `codex/` 前缀；开发提交推送到功能分支，通过 PR 审查后再合并到 `main`。
+
+```bash
+git fetch origin
+git switch -c codex/your-feature origin/main
+# 完成修改与验证后，分步提交
+git push -u origin HEAD
+gh pr create --base main
+```
+
+已有未合并改动时继续使用其分支；另一个独立任务从基线创建新分支或 worktree。不要覆盖其他任务的未提交文件。
+
+Codex 审查遵循 [AGENTS.md](AGENTS.md)。在 [Codex 审查设置](https://app.chatgpt.com/settings/code-review) 中为仓库启用自动审查，或在 PR 评论中发送 `@codex review` 触发一次审查。审查反馈修复并验证后，由维护者决定合并。添加仓库规则文件本身不会开启云端自动审查。
+
 ## 代码与文档修改
 
 - 一个改动聚焦一个问题，提交说明写清触发条件和最终行为。
