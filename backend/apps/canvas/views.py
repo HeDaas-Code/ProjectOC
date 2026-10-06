@@ -140,12 +140,12 @@ class CanvasViewSet(viewsets.ModelViewSet):
         # The sync daemon is an internal peer, not a browser client. It uses a
         # separate shared secret for the snapshot endpoint because it cannot
         # forward a Django session cookie.
-        if getattr(self, "action", None) in {"sync_state", "sync_snapshot", "sync_ops", "sync_events", "sync_reconciliation", "compact_ops"}:
+        if getattr(self, "action", None) in {"sync_state", "sync_ops", "sync_events", "sync_reconciliation", "compact_ops"}:
             return []
         return super().get_authenticators()
 
     def get_permissions(self):
-        if getattr(self, "action", None) in {"sync_state", "sync_snapshot", "sync_ops", "sync_events", "sync_reconciliation", "compact_ops"}:
+        if getattr(self, "action", None) in {"sync_state", "sync_ops", "sync_events", "sync_reconciliation", "compact_ops"}:
             return [AllowAny()]
         return super().get_permissions()
 
@@ -181,6 +181,8 @@ class CanvasViewSet(viewsets.ModelViewSet):
         snapshot = request.data.get("snapshot")
         sync_metadata = request.data.get("sync_metadata", {})
         expected = request.data.get("expected_version")
+        if isinstance(sync_metadata, dict) and sync_metadata.get("protocol") == "records-v1":
+            return Response({"detail": "records-v1 retired; use tldraw-sync-v2"}, status=410)
         if not isinstance(snapshot, dict):
             return Response({"detail": "snapshot must be an object"}, status=400)
         if not isinstance(sync_metadata, dict):
@@ -299,7 +301,7 @@ class CanvasViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get", "post"], url_path="sync-ops")
     def sync_ops(self, request, pk=None):
-        """Internal durable operation log used for reconnect/replay."""
+        """Read-only historical records-v1 log for one-time migration."""
         if not self._sync_internal_allowed(request):
             return Response({"detail": "sync service authentication required"}, status=403)
         canvas = StagingCanvas.objects.filter(pk=pk).first()
@@ -320,52 +322,7 @@ class CanvasViewSet(viewsets.ModelViewSet):
                 "has_more": bool(operations and operations[-1].sequence < canvas.operation_sequence),
             })
 
-        raw_operations = request.data.get("operations", request.data.get("ops"))
-        if not isinstance(raw_operations, list) or not raw_operations or len(raw_operations) > 100:
-            return Response({"detail": "operations 必须包含 1-100 条操作"}, status=400)
-        normalized = []
-        for operation in raw_operations:
-            if not isinstance(operation, dict):
-                return Response({"detail": "操作必须是对象"}, status=400)
-            op_id = operation.get("opId", operation.get("op_id"))
-            client_id = operation.get("clientId", operation.get("client_id"))
-            kind = operation.get("kind")
-            try:
-                clock = int(operation.get("clock"))
-            except (TypeError, ValueError):
-                clock = 0
-            if not isinstance(op_id, str) or not 1 <= len(op_id) <= 256 or not isinstance(client_id, str) or not 1 <= len(client_id) <= 128 or clock < 1 or kind not in {"put", "remove"}:
-                return Response({"detail": "操作缺少合法的 opId、clientId、clock 或 kind"}, status=400)
-            if kind == "put":
-                record = operation.get("record")
-                if not isinstance(record, dict) or not isinstance(record.get("id"), str) or not isinstance(record.get("typeName"), str):
-                    return Response({"detail": "put 操作必须包含 record.id 和 record.typeName"}, status=400)
-            elif not isinstance(operation.get("recordId"), str) or not operation.get("recordId"):
-                return Response({"detail": "remove 操作必须包含 recordId"}, status=400)
-            normalized.append(dict(operation))
-
-        with transaction.atomic():
-            canvas = StagingCanvas.objects.select_for_update().get(pk=pk)
-            if canvas.status == StagingCanvas.Status.ARCHIVED:
-                return Response({"detail": "archived canvas"}, status=409)
-            result = []
-            for operation in normalized:
-                op_id = operation.get("opId", operation.get("op_id"))
-                existing = CanvasOperation.objects.filter(canvas=canvas, op_id=op_id).first()
-                if existing:
-                    if existing.operation != operation:
-                        return Response({"detail": "opId 已被不同操作占用", "op_id": op_id}, status=409)
-                    result.append({"sequence": existing.sequence, "operation": existing.operation})
-                    continue
-                canvas.operation_sequence += 1
-                row = CanvasOperation.objects.create(
-                    canvas=canvas, sequence=canvas.operation_sequence, op_id=op_id,
-                    client_id=operation.get("clientId", operation.get("client_id")),
-                    clock=int(operation["clock"]), operation=operation,
-                )
-                result.append({"sequence": row.sequence, "operation": row.operation})
-            canvas.save(update_fields=["operation_sequence", "updated_at"])
-        return Response({"operations": result, "cursor": canvas.operation_sequence})
+        return Response({"detail": "records-v1 retired; use tldraw-sync-v2"}, status=410)
 
     @action(detail=True, methods=["post"], url_path="compact-ops")
     def compact_ops(self, request, pk=None):

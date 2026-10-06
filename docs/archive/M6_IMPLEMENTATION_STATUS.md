@@ -1,3 +1,5 @@
+> 当前版本变更：records-v1 已退役。以下内容为历史实现记录，旧协议兼容、回滚和降级描述不再适用。当前运行方式见 [项目 README](../../README.md)。
+
 # M6 implementation status
 
 这是一个可运行的 M6 增量基础，不是完整的协作产品发布版。部署目标仍是可信的私有网络；生产启用协作前必须完成 HTTPS/WSS、备份恢复、许可和多浏览器验证。
@@ -262,3 +264,13 @@ cd backend
 - 生产门禁仍保持 `production_collaboration_enabled=false`、`license_configured=false`：当前没有真实 `VITE_TLDRAW_LICENSE_KEY`、真实生产证书或 credentialed staging Playwright 凭据；本地自签名 HTTPS 和自动化单元/集成测试不等于官方许可或生产多浏览器验收。
 - `deploy/staging-failure-drill.sh` 现在为每次服务重启验收使用隔离 probe report，避免内部调用 `staging-verify.sh` 覆盖父级故障演练报告；故障演练结果可完整保留 redis、neo4j、postgres、sync-service、backend、outbox-worker 六项重启记录。
 - 最新自托管 staging 验收：`staging-up` 4 PASS/1 SKIP；`staging-verify` 27 PASS/0 FAIL/2 SKIP；隔离备份恢复 8 PASS/0 FAIL/0 SKIP；failure drill 9 PASS/0 FAIL/3 SKIP。所有服务随后已执行 `staging-down.sh` 清理。
+
+
+## 当前版本：records-v1 退役
+
+- 前端画布统一使用官方 useSync，移除旧 WebSocket 操作队列、冲突 UI、presence 广播与 REST 快照回退；旧本地操作和快照保持可导出。
+- 服务端移除旧实时房间与 Redis pub/sub；旧协议连接和旧操作写入返回 410。保留历史日志 GET、数据库记录及冻结解码器用于一次性迁移。
+- 迁移还原快照 checkpoint 后的历史日志，缺失日志时停止迁移；官方房间初始化和租约获取去重。断开最后一个客户端时，有待持久化任务的房间继续重试。
+- 官方重连动态获取新票据；连接状态显示真实 online/offline。离线时阻止切换画布，避免卸载仍有本地编辑的同步客户端。
+- 验证：后端 pytest 71 passed / 1 skipped（真实 Neo4j 联调需单独环境）；同步服务 35 passed；前端 12 passed（旧协议测试随模块移除）；TypeScript/Vite build、Django check、迁移检查及部署脚本语法检查通过。Playwright 官方协议三浏览器、reader 权限、断网编辑重连及同步服务重启恢复 1 passed。
+- 上述验收未包含 PostgreSQL 故障后进程强制终止等全部持久化边界；生产许可和真实部署门禁保持独立。

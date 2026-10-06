@@ -29,7 +29,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: 'PORT=8788 SYNC_CONTROL_PORT=8789 DJANGO_INTERNAL_URL=http://127.0.0.1:8124 SYNC_TICKET_SECRET=projectoc-playwright-ticket-secret SYNC_INTERNAL_SECRET=projectoc-playwright-internal-secret SYNC_ALLOWED_ORIGINS=http://127.0.0.1:5175 SYNC_REQUIRE_ORIGIN=1 node ../frontend/e2e/sync-server-wrapper.mjs',
+      command: 'PORT=8788 SYNC_CONTROL_PORT=8789 DJANGO_INTERNAL_URL=http://127.0.0.1:8124 SYNC_TICKET_SECRET=projectoc-playwright-ticket-secret SYNC_INTERNAL_SECRET=projectoc-playwright-internal-secret SYNC_ALLOWED_ORIGINS=http://127.0.0.1:5175 SYNC_REQUIRE_ORIGIN=1 TLDRAW_SYNC_DATA_DIR=/tmp/projectoc-playwright-sync node ../frontend/e2e/sync-server-wrapper.mjs',
       cwd: '../sync-service',
       url: 'http://127.0.0.1:8788/health',
       timeout: 60_000,

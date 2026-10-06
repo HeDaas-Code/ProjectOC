@@ -45,9 +45,7 @@ if [[ "${STAGING_ALLOW_LOCAL_DEFAULTS:-1}" == "1" ]]; then
   export DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}"
   export SYNC_TICKET_SECRET="${SYNC_TICKET_SECRET:-projectoc-staging-ticket-secret-change-me-123456}"
   export SYNC_INTERNAL_SECRET="${SYNC_INTERNAL_SECRET:-projectoc-staging-internal-secret-change-me-123456}"
-  export TLDRAW_SYNC_OFFICIAL_ENABLED="${TLDRAW_SYNC_OFFICIAL_ENABLED:-1}"
   export TLDRAW_SCHEMA_VERSION="${TLDRAW_SCHEMA_VERSION:-oc-tldraw-2}"
-  export VITE_TLDRAW_OFFICIAL_SYNC="${VITE_TLDRAW_OFFICIAL_SYNC:-1}"
   if [[ "$STAGING_TLS" == "1" ]]; then
     export CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS:-https://localhost}"
     export SYNC_SERVICE_URL="${SYNC_SERVICE_URL:-wss://localhost/rooms/}"

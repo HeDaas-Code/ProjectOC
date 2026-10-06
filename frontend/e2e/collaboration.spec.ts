@@ -31,7 +31,7 @@ async function waitForCanvas(page: Page) {
   await expect(page.locator('.canvas-status')).toContainText(/实时协作已连接|只读协作|实时服务不可用/)
 }
 
-async function bootstrapOwner(page: Page, runId = unique) {
+async function bootstrapOwner(page: Page, runId = unique, checkDialogs = false) {
   await page.goto('/')
   const setup = await page.request.get('/api/v1/auth/bootstrap/')
   expect(setup.ok()).toBeTruthy()
@@ -52,11 +52,64 @@ async function bootstrapOwner(page: Page, runId = unique) {
   }
   await waitForWorkbench(page)
 
-  page.once('dialog', dialog => dialog.accept(`${runId} 世界`))
+  const welcomeCreate = page.getByRole('button', { name: '创建第一个世界观 →', exact: true })
+  if (await welcomeCreate.isVisible()) await welcomeCreate.click()
+  else await page.getByRole('button', { name: /新建世界观/ }).click()
+  const createDialog = page.getByRole('dialog')
+  await expect(createDialog).toBeVisible()
+  await expect(createDialog.getByLabel('世界观名称')).toBeFocused()
+  await expect(createDialog.getByRole('button', { name: '创建世界观 →', exact: true })).toBeDisabled()
+  await createDialog.getByLabel('世界观名称').fill('   ')
+  await expect(createDialog.getByRole('button', { name: '创建世界观 →', exact: true })).toBeDisabled()
+  await createDialog.getByLabel('世界观名称').press('Escape')
+  await expect(createDialog).not.toBeVisible()
   await page.getByRole('button', { name: /新建世界观/ }).click()
+  await expect(createDialog.getByLabel('世界观名称')).toHaveValue('')
+  await createDialog.getByLabel('世界观名称').fill(`${runId} 世界`)
+  // A failed request stays in the application dialog and preserves the name.
+  await page.route('**/api/v1/workspaces/', async route => {
+    if (route.request().method() === 'POST') await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: '暂时无法创建' }) })
+    else await route.continue()
+  })
+  await createDialog.getByLabel('世界观名称').press('Enter')
+  await expect(createDialog.getByRole('alert')).toContainText('暂时无法创建')
+  await expect(createDialog.getByLabel('世界观名称')).toHaveValue(`${runId} 世界`)
+  await page.unroute('**/api/v1/workspaces/')
+  await createDialog.getByRole('button', { name: '创建世界观 →', exact: true }).click()
+  await expect(createDialog).not.toBeVisible()
   await expect(page.locator('.workspace-picker select option').filter({ hasText: `${runId} 世界` })).toHaveCount(1)
   await expect(page.locator('.canvas-list button')).toHaveCount(1)
   await waitForCanvas(page)
+  if (checkDialogs) {
+    // Every application action must stay inside styled dialogs.
+    page.on('dialog', dialog => { throw new Error(`Unexpected browser dialog: ${dialog.type()}`) })
+    await page.getByRole('button', { name: '命名', exact: true }).click()
+    const rename = page.getByRole('dialog', { name: '命名画布' })
+    await expect(rename.getByLabel('画布名称')).toBeFocused()
+    await rename.getByLabel('画布名称').fill('   ')
+    await expect(rename.getByRole('button', { name: '保存名称' })).toBeDisabled()
+    await rename.getByLabel('画布名称').fill(`${runId} 画布`)
+    await rename.getByLabel('画布名称').press('Enter')
+    await expect(rename).not.toBeVisible()
+    await expect(page.locator('.canvas-list button')).toContainText(`${runId} 画布`)
+    await waitForCanvas(page)
+    const originalBranch = await page.locator('.branch-controls select').inputValue()
+    await page.getByRole('button', { name: '＋ 分支', exact: true }).click()
+    const branchDialog = page.getByRole('dialog', { name: '创建工作分支' })
+    await branchDialog.getByLabel('分支名称').fill(`${runId}-draft`)
+    await branchDialog.getByRole('button', { name: '创建分支', exact: true }).click()
+    await expect(page.locator('.branch-controls select option:checked')).toHaveText(`${runId}-draft`)
+    await page.getByRole('button', { name: '归档分支', exact: true }).click()
+    const archive = page.getByRole('dialog', { name: '归档工作分支' })
+    await expect(archive).toContainText(`${runId}-draft`)
+    await archive.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(page.getByRole('button', { name: '归档分支', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '归档分支', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '归档分支', exact: true }).click()
+    await expect(page.locator('.branch-controls select')).toHaveValue('main')
+    await page.locator('.branch-controls select').selectOption(originalBranch)
+    await expect(page.locator('.branch-controls select')).toHaveValue(originalBranch)
+  }
   const workspaceId = await page.locator('.workspace-picker select').inputValue()
   const canvases = await json<Array<{ id: string; name: string }>>(page.request, `/api/v1/canvases/?workspace=${workspaceId}`)
   expect(canvases).toHaveLength(1)
@@ -86,7 +139,8 @@ async function inviteAndSignup(owner: Page, workspaceId: string, role: 'editor' 
 }
 
 test.describe('authenticated multi-browser collaboration', () => {
-  test('owner invites editor and reader; editor syncs presence while reader stays read-only', async ({ browser }) => {
+  test('official sync shares edits, enforces reader access and recovers after restart', async ({ browser }) => {
+    test.setTimeout(90_000)
     const ownerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:5175' })
     const owner = await ownerContext.newPage()
     const { workspaceId, canvasId } = await bootstrapOwner(owner)
@@ -105,11 +159,6 @@ test.describe('authenticated multi-browser collaboration', () => {
     await expect(reader.getByRole('button', { name: /Markdown/ })).toBeDisabled()
     await expect(reader.locator('.canvas-status')).toContainText(/只读/)
 
-    // Both browser sessions are in the same room. Presence is rendered by
-    // the real websocket service and is independent of the REST session.
-    await expect(owner.locator('.canvas-status')).toContainText(/3 位协作者/, { timeout: 15_000 })
-    await expect(editor.locator('.canvas-status')).toContainText(/3 位协作者/, { timeout: 15_000 })
-
     // REST writes are protected by the backend role check, not only by disabled
     // buttons. A reader session must not be able to mutate the canvas.
     const readerCsrf = await csrf(readerContext)
@@ -119,32 +168,6 @@ test.describe('authenticated multi-browser collaboration', () => {
       headers: { 'X-CSRFToken': readerCsrf },
     })
     expect(forbiddenWrite.status()).toBe(403)
-
-    // Exercise the actual signed reader WebSocket ticket. Even if a malicious
-    // client bypasses the UI, the sync service must reject mutation messages.
-    const ticket = await json<{ ticket: string; url: string }>(readerContext.request, `/api/v1/canvases/${canvasId}/sync-ticket/`, 'POST', {}, readerCsrf)
-    const websocketResult = await reader.evaluate(async ({ url, signedTicket }) => {
-      return await new Promise<{ code?: string; detail?: string }>((resolve) => {
-        const separator = url.includes('?') ? '&' : '?'
-        const socket = new WebSocket(`${url}${separator}ticket=${encodeURIComponent(signedTicket)}`)
-        const timer = window.setTimeout(() => { socket.close(); resolve({ detail: 'timeout' }) }, 5_000)
-        socket.onmessage = event => {
-          const message = JSON.parse(event.data)
-          if (message.type === 'hello') {
-            socket.send(JSON.stringify({
-              type: 'ops',
-              ops: [{ kind: 'remove', recordId: 'shape:reader-attempt', clock: 1, opId: 'reader-attempt' }],
-            }))
-          } else if (message.type === 'error') {
-            window.clearTimeout(timer)
-            socket.close()
-            resolve({ code: message.code, detail: message.detail })
-          }
-        }
-        socket.onerror = () => { window.clearTimeout(timer); resolve({ detail: 'socket error' }) }
-      })
-    }, { url: ticket.url, signedTicket: ticket.ticket })
-    expect(websocketResult.code).toBe('read_only')
 
     // An editor can create a draft through the real TLDraw adapter; the reader
     // cannot even open the editor action.
@@ -163,27 +186,33 @@ test.describe('authenticated multi-browser collaboration', () => {
     // Queue a real canvas edit while the browser is offline. The operation
     // must survive reconnect and be drained only after durable acknowledgement.
     await ownerContext.setOffline(true)
-    await expect(owner.locator('.canvas-status')).toContainText(/协作已断开|自动重连|连接错误/, { timeout: 10_000 })
+    await expect(owner.locator('.canvas-status')).toContainText(/离线|待重连/, { timeout: 10_000 })
     await owner.getByRole('button', { name: /Markdown/ }).click()
     await expect(owner.getByRole('heading', { name: '编辑 markdown' })).toBeVisible()
     await owner.getByLabel('卡片内容').fill('断网后排队的协作草稿')
     await owner.getByRole('button', { name: '放入画布' }).click()
-    await expect(owner.locator('.canvas-status')).toContainText(/待发送|离线|待同步/, { timeout: 10_000 })
+    await expect(owner.locator('.canvas-status')).toContainText(/离线|待重连/, { timeout: 10_000 })
     await ownerContext.setOffline(false)
     await expect(owner.locator('.canvas-status')).toContainText(/实时协作已连接/, { timeout: 15_000 })
     await expect(owner.locator('.canvas-status')).not.toContainText(/待发送/, { timeout: 15_000 })
 
+    await expect(reader.locator('.oc-card')).toHaveCount(2, { timeout: 15_000 })
+    // Wait for PostgreSQL durability before restarting the service.
+    await expect.poll(async () => {
+      const canvas = await json<any>(owner.request, `/api/v1/canvases/${canvasId}/`)
+      return Object.values(canvas.snapshot?.document?.store || {}).filter((record: any) => record.typeName === 'shape' && record.type === 'oc-card').length
+    }).toBe(2)
     // Restart the actual sync-service process. The browser must reconnect to
     // a fresh room instance and reconstruct the persisted canvas snapshot.
     const restart = await owner.request.post('http://127.0.0.1:8789/__test/restart')
     expect(restart.ok()).toBeTruthy()
-    await reader.reload()
+    await reader.reload({ waitUntil: 'domcontentloaded' })
     await waitForWorkbench(reader)
     await waitForCanvas(reader)
     await expect(reader.locator('.oc-card')).toHaveCount(2, { timeout: 20_000 })
     await expect(reader.locator('.oc-card').filter({ hasText: '断网后排队的协作草稿' })).toHaveCount(1, { timeout: 20_000 })
 
-    await owner.reload()
+    await owner.reload({ waitUntil: 'domcontentloaded' })
     await waitForWorkbench(owner)
     await waitForCanvas(owner)
     await expect(owner.locator('.canvas-status')).toContainText(/实时协作已连接/, { timeout: 15_000 })
@@ -191,88 +220,20 @@ test.describe('authenticated multi-browser collaboration', () => {
     await Promise.all([ownerContext.close(), editorContext.close(), readerContext.close()])
   })
 
-  test('surfaces a stale offline field and lets the editor explicitly retry it', async ({ browser }) => {
-    const runId = `${unique}-conflict-${Math.random().toString(16).slice(2)}`
-    const ownerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:5175' })
-    const owner = await ownerContext.newPage()
-    const { workspaceId, canvasId } = await bootstrapOwner(owner, runId)
-    const editorContext = await inviteAndSignup(owner, workspaceId, 'editor', `${runId}-editor`, `${runId}-editor@example.test`)
-    const editor = await editorContext.newPage()
+})
 
-    try {
-      await Promise.all([editor.goto('/'), waitForWorkbench(editor)])
-      await Promise.all([waitForCanvas(owner), waitForCanvas(editor)])
 
-      await editor.getByRole('button', { name: /Markdown/ }).click()
-      await editor.getByRole('heading', { name: '编辑 markdown' }).waitFor()
-      await editor.getByLabel('卡片内容').fill('冲突测试基线')
-      await editor.getByRole('button', { name: '放入画布' }).click()
-      await expect(owner.locator('.oc-card .card-body')).toContainText('冲突测试基线', { timeout: 15_000 })
-
-      const canvasResponse = await owner.request.get(`/api/v1/canvases/${canvasId}/`)
-      expect(canvasResponse.ok()).toBeTruthy()
-      const canvas = await canvasResponse.json() as { snapshot: { document?: { store?: Record<string, any> } } }
-      const card = Object.values(canvas.snapshot?.document?.store || {}).find((record: any) => record?.typeName === 'shape' && record?.props?.kind === 'markdown') as any
-      expect(card?.id).toBeTruthy()
-
-      await owner.locator('.oc-card').first().click()
-      await owner.getByRole('button', { name: '编辑卡片' }).click()
-      await expect(owner.getByRole('heading', { name: '编辑 markdown' })).toBeVisible()
-      await owner.getByLabel('卡片内容').fill('本地离线冲突')
-
-      const ownerClientId = await owner.evaluate((id) => sessionStorage.getItem(`oc:sync-client:${id}`), canvasId)
-      const localClock = await owner.evaluate((id) => Number(sessionStorage.getItem(`oc:sync-clock:${id}`) || 0), canvasId)
-      expect(ownerClientId).toBeTruthy()
-
-      await ownerContext.setOffline(true)
-      await expect(owner.locator('.canvas-status')).toContainText(/协作已断开|自动重连|连接错误/, { timeout: 10_000 })
-      await owner.getByRole('button', { name: '放入画布' }).click()
-      await expect(owner.locator('.canvas-status')).toContainText(/待发送|离线|待同步/, { timeout: 10_000 })
-
-      const csrfToken = await csrf(editorContext)
-      const ticket = await json<{ ticket: string; url: string }>(editor.request, `/api/v1/canvases/${canvasId}/sync-ticket/`, 'POST', { client_id: 'remote-conflict-client' }, csrfToken)
-      const remoteResult = await editor.evaluate(async ({ url, signedTicket, record, clock }) => {
-        return await new Promise<any>((resolve) => {
-          const separator = url.includes('?') ? '&' : '?'
-          const socket = new WebSocket(`${url}${separator}ticket=${encodeURIComponent(signedTicket)}`)
-          const timer = window.setTimeout(() => { socket.close(); resolve({ detail: 'timeout' }) }, 10_000)
-          socket.onmessage = event => {
-            const message = JSON.parse(event.data)
-            if (message.type === 'hello') {
-              socket.send(JSON.stringify({ type: 'ops', ops: [{
-                kind: 'put',
-                clock,
-                opId: '0',
-                record: { ...record, props: { ...record.props, text: '远端冲突值' } },
-              }] }))
-            } else if (message.type === 'ops_ack') {
-              window.clearTimeout(timer)
-              socket.close()
-              resolve(message)
-            }
-          }
-          socket.onerror = () => { window.clearTimeout(timer); socket.close(); resolve({ detail: 'socket error' }) }
-        })
-      }, { url: ticket.url, signedTicket: ticket.ticket, record: card, clock: Math.max(1, localClock + 1) })
-      expect(remoteResult.durable).toBe(true)
-      expect(remoteResult.accepted).toHaveLength(1)
-
-      await ownerContext.setOffline(false)
-      // Reconnect can briefly hit the service's anti-flood guard while the
-      // offline queue is being replayed; the conflict panel is the durable
-      // assertion we actually need here.
-      await expect(owner.locator('[aria-label="协作冲突审核"]')).toBeVisible({ timeout: 20_000 })
-      await expect(owner.locator('[aria-label="协作冲突审核"]')).toContainText('本地离线冲突')
-      await expect(owner.locator('[aria-label="协作冲突审核"]')).toContainText('远端冲突值')
-
-      // The retry gets the next local Lamport clock, which is equal to the
-      // remote clock here; opId ordering makes the explicit retry win.
-      await owner.locator('[aria-label="协作冲突审核"]').getByRole('button', { name: '重试本地值' }).click()
-      await expect(owner.locator('[aria-label="协作冲突审核"]')).not.toBeVisible({ timeout: 10_000 })
-      await expect(owner.locator('.oc-card .card-body')).toContainText('本地离线冲突', { timeout: 15_000 })
-    } finally {
-      await ownerContext.close()
-      await editorContext.close()
-    }
-  })
+test('styled input and confirmation dialogs support keyboard and cancellation', async ({ page }) => {
+  await bootstrapOwner(page, `${unique}-dialogs`, true)
+  await page.getByRole('button', { name: '◷ 时间线', exact: true }).click()
+  await page.getByRole('button', { name: '＋ 时间体系', exact: true }).click()
+  const system = page.getByRole('dialog', { name: '创建时间体系' })
+  await expect(system.getByLabel('时间体系名称')).toBeFocused()
+  await expect(system.getByLabel('最小计量单位')).toHaveValue('日')
+  await system.getByLabel('时间体系名称').fill('王历')
+  await system.getByLabel('最小计量单位').fill('   ')
+  await expect(system.getByRole('button', { name: '创建体系' })).toBeDisabled()
+  await system.getByLabel('最小计量单位').fill('日')
+  await system.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(system).not.toBeVisible()
 })

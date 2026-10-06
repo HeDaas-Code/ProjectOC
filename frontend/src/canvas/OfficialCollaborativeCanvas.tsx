@@ -9,7 +9,7 @@ import { CardUtil } from './adapter'
 const officialShapeUtils = [...defaultShapeUtils, CardUtil]
 
 export interface OfficialCollaborativeCanvasProps {
-  uri: string
+  uri: string | (() => Promise<string>)
   readOnly: boolean
   licenseKey?: string
   onMount?: (editor: Editor) => void
@@ -17,9 +17,7 @@ export interface OfficialCollaborativeCanvasProps {
 }
 
 /**
- * Official TLDraw sync-core client. This component is intentionally isolated
- * from the records-v1 transport so a canvas can never have both protocols
- * connected at once. The server grants read-only access during the handshake;
+ * Official TLDraw sync-core client, the only supported canvas transport. The server grants read-only access during the handshake;
  * the local editor is also locked immediately for readers to avoid a misleading
  * editable frame while the room is loading.
  */
@@ -39,10 +37,10 @@ export function OfficialCollaborativeCanvas({
   useEffect(() => {
     if (remote.status === 'loading') onStatus?.('连接中…')
     else if (remote.status === 'error') onStatus?.('实时协作连接失败', remote.error)
-    else onStatus?.('实时协作已连接')
-  }, [remote.status, remote.status === 'error' ? remote.error : undefined, onStatus])
+    else onStatus?.(remote.status === 'synced-remote' && remote.connectionStatus === 'offline' ? '离线 · 等待重连' : '实时协作已连接')
+  }, [remote.status, remote.status === 'error' ? remote.error : undefined, remote.status === 'synced-remote' ? remote.connectionStatus : undefined, onStatus])
 
-  if (remote.status === 'loading') return <div className="canvas-sync-loading">正在连接官方 TLDraw CRDT…</div>
+  if (remote.status === 'loading') return <div className="canvas-sync-loading">正在连接画布同步…</div>
   if (remote.status === 'error') return <div className="canvas-sync-error">实时协作连接失败：{remote.error.message}</div>
 
   return (

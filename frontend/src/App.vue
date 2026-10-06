@@ -11,6 +11,9 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import TimelinePanel from './components/TimelinePanel.vue'
 import MergePanel from './components/MergePanel.vue'
 import AdminPanel from './components/AdminPanel.vue'
+import CreateWorldDialog from './components/CreateWorldDialog.vue'
+import DialogHost from './components/DialogHost.vue'
+import { requestDialog, confirmAction } from './services/dialog'
 
 const store = useWorkbench()
 const authUser = ref<any>(null)
@@ -28,6 +31,8 @@ const selectedId = ref('')
 const surface = ref<InstanceType<typeof CanvasSurface>>()
 const loading = ref(true)
 const mergeBranchId = ref('')
+const creatingWorld = ref(false), worldBusy = ref(false), worldError = ref('')
+const createdWorld = ref<Workspace>(), createdCanvas = ref<Canvas>()
 const inviteToken = ref(window.location.pathname.startsWith('/invite/') ? decodeURIComponent(window.location.pathname.slice('/invite/'.length).split('/')[0]) : '')
 const inviteInfo = ref<any>(null)
 const inviteName = ref('')
@@ -52,22 +57,40 @@ async function loadWorkspaceRole() {
   } catch { /* fail closed */ }
 }
 async function flush() { await surface.value?.flush() }
-async function newWorld() { const name = prompt('为这个世界起一个名字'); if (!name?.trim()) return; await run(async () => { await flush(); const w = await api<Workspace>('workspaces/', 'POST', { name }); store.workspaces.unshift(w); await store.selectWorkspace(w); await newCanvas() }) }
+function newWorld() {
+  if (store.sending || worldBusy.value) return
+  worldError.value = ''; createdWorld.value = undefined; createdCanvas.value = undefined; creatingWorld.value = true
+}
+async function submitWorld(name: string) {
+  if (worldBusy.value || !name.trim()) return
+  worldBusy.value = true; worldError.value = ''
+  try {
+    await flush()
+    // Keep successful steps across retries so a later failure never creates a second world.
+    if (!createdWorld.value) createdWorld.value = await api<Workspace>('workspaces/', 'POST', { name: name.trim() })
+    if (!store.workspaces.some(w => w.id === createdWorld.value!.id)) store.workspaces.unshift(createdWorld.value)
+    if (!createdCanvas.value) createdCanvas.value = await api<Canvas>('canvases/', 'POST', { workspace: createdWorld.value.id, name: '新的灵感画布' })
+    await store.selectWorkspace(createdWorld.value)
+    selectedId.value = ''; tab.value = 'canvas'; creatingWorld.value = false
+  } catch (error) {
+    worldError.value = `${createdWorld.value ? '世界观已创建，画布尚未准备完成。请重试。' : '创建失败，请重试。'} ${error instanceof Error ? error.message : String(error)}`
+  } finally { worldBusy.value = false }
+}
 async function newCanvas() { if (!store.workspace) return; await run(async () => { await flush(); const c = await api<Canvas>('canvases/', 'POST', { workspace: store.workspace!.id, name: '新的灵感画布' }); store.canvases.unshift(c); await store.selectCanvas(c); tab.value = 'canvas' }) }
 async function chooseCanvas(c: Canvas) { if (store.sending) return; await run(async () => { await flush(); await store.selectCanvas(c); tab.value = 'canvas' }) }
 async function workspaceChange(e: Event) { await run(async () => { await flush(); await store.selectWorkspace(store.workspaces.find(w => w.id === (e.target as HTMLSelectElement).value)!); selectedId.value = ''; tab.value = 'canvas' }) }
 async function canvasAction(action: string) { if (!store.canvas) return; await run(async () => { await flush(); const c = store.canvas!; let result: Canvas
   if (action === 'duplicate') result = await api(`canvases/${c.id}/duplicate/`, 'POST', {})
-  else if (action === 'restore') { const revisions = await api<{version:number}[]>(`canvases/${c.id}/revisions/`); const version = Number(prompt(`恢复快照版本，可选：${revisions.map(r => r.version).join(', ')}`)); if (!version) return; result = await api(`canvases/${c.id}/restore/`, 'POST', { version, expected_version: c.snapshot_version }) }
-  else { const name = action === 'rename' ? prompt('画布名称', c.name) : c.name; if (!name) return; result = await api(`canvases/${c.id}/`, 'PATCH', { name, status: action === 'archive' ? 'archived' : action === 'unarchive' ? 'active' : c.status, expected_version: c.snapshot_version }) }
+  else if (action === 'restore') { const revisions = await api<{version:number}[]>(`canvases/${c.id}/revisions/`); if (!revisions.length) { store.error = '这张画布还没有可恢复的历史快照。'; return }; const choice = await requestDialog({ title: '恢复历史快照', description: '恢复后，画布将替换为所选版本的内容。', confirmLabel: '恢复快照', fields: [{ key: 'version', label: '快照版本', options: revisions.map(r => ({ value: String(r.version), label: `版本 ${r.version}` })) }] }); if (!choice) return; const version = Number(choice.version); await flush(); const current = await api<Canvas>(`canvases/${c.id}/`); result = await api(`canvases/${c.id}/restore/`, 'POST', { version, expected_version: current.snapshot_version }) }
+  else { const choice = action === 'rename' ? await requestDialog({ title: '命名画布', confirmLabel: '保存名称', fields: [{ key: 'name', label: '画布名称', value: c.name }] }) : { name: c.name }; if (!choice) return; const name = choice.name; await flush(); const current = await api<Canvas>(`canvases/${c.id}/`); result = await api(`canvases/${c.id}/`, 'PATCH', { name, status: action === 'archive' ? 'archived' : action === 'unarchive' ? 'active' : c.status, expected_version: current.snapshot_version }) }
   store.canvases = await api(`canvases/?workspace=${store.workspace!.id}`); store.canvas = undefined; await new Promise(r => setTimeout(r,0)); await store.selectCanvas(result)
 }) }
 async function changeBranch(e: Event) { await run(() => store.selectBranch((e.target as HTMLSelectElement).value)); selectedId.value = '' }
-async function createBranch() { if (!store.workspace) return; const name = prompt('新工作分支名称'); if (!name?.trim()) return; await run(async () => { const branch = await api('branches/', 'POST', { workspace: store.workspace!.id, name: name.trim() }); await store.refreshBranches(); await store.selectBranch(branch.id) }) }
+async function createBranch() { if (!store.workspace) return; const choice = await requestDialog({ title: '创建工作分支', description: '在分支中探索世界的新可能。', confirmLabel: '创建分支', fields: [{ key: 'name', label: '分支名称' }] }); if (!choice) return; const name = choice.name; await run(async () => { const branch = await api('branches/', 'POST', { workspace: store.workspace!.id, name: name.trim() }); await store.refreshBranches(); await store.selectBranch(branch.id) }) }
 async function mergeBranch() { const branch = store.branches.find(b => b.id === store.branchKey); if (!branch || branch.name === 'main' || branch.status !== 'active') return; mergeBranchId.value = branch.id }
 async function finishMerge() { mergeBranchId.value = ''; await store.refreshBranches(); await store.selectBranch('main'); await store.refreshWorld() }
 function focusTimelineTarget(target: { id: string; kind: string }) { selectedId.value = target.id; if (target.kind !== 'event') tab.value = 'graph' }
-async function archiveBranch() { const branch = store.branches.find(b => b.id === store.branchKey); if (!branch || branch.name === 'main' || branch.status !== 'active' || !confirm(`归档分支“${branch.name}”？`)) return; await run(async () => { await api(`branches/${branch.id}/archive/`, 'POST', {}); await store.refreshBranches(); await store.selectBranch('main') }) }
+async function archiveBranch() { const branch = store.branches.find(b => b.id === store.branchKey); if (!branch || branch.name === 'main' || branch.status !== 'active' || !await confirmAction(`归档分支“${branch.name}”？`, '归档工作分支', '归档分支')) return; await run(async () => { await api(`branches/${branch.id}/archive/`, 'POST', {}); await store.refreshBranches(); await store.selectBranch('main') }) }
 async function changeTab(value: string) { await run(async () => { await flush(); tab.value = value }) }
 async function focusMaintenanceTarget(id: string) { await run(async () => { try { await api(`entities/${id}/?workspace=${store.workspace!.id}${store.branchKey === 'main' ? '' : `&branch=${encodeURIComponent(store.branchKey)}`}`); selectedId.value = id } catch { const relation = await api<{ source: string }>(`relations/${id}/`); selectedId.value = relation.source } tab.value = 'graph' }) }
 function saved(c: Canvas) { if (store.canvas?.id === c.id) { store.canvas = c; const i = store.canvases.findIndex(x => x.id === c.id); if (i >= 0) store.canvases[i] = c } }
@@ -120,4 +143,6 @@ watch(() => [store.workspace?.id, authUser.value?.id], () => { void loadWorkspac
       <TimelinePanel v-else-if="tab === 'timeline'" :key="store.workspace.id" :workspace="store.workspace.id" :branch="store.branchKey" :entities="store.entities" @error="store.error = $event" @focus-target="focusTimelineTarget"/><GraphPanel v-else-if="tab === 'graph'" :key="store.workspace.id" :workspace="store.workspace.id" :branch="store.branchKey" :revision="store.jobs.map(j => j.id).join()" :selected-id="selectedId" @error="store.error = $event"/><HistoryPanel v-else :key="`${store.workspace.id}:${store.branchKey}:${store.canvas?.id || 'none'}`" :branch="store.branchKey" :canvas="store.canvas?.id" :can-edit="canEditWorkspace" @focus-target="focusMaintenanceTarget"/>
     </main>
   </div>
+  <DialogHost />
+  <CreateWorldDialog v-if="authUser" :open="creatingWorld" :busy="worldBusy" :error="worldError" :name-locked="Boolean(createdWorld)" @close="creatingWorld = false" @submit="submitWorld" />
 </template>

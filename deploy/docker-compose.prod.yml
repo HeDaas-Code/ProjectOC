@@ -27,7 +27,6 @@ services:
       SYNC_REQUIRE_ORIGIN: "1"
       SYNC_TICKET_SECRET: ${SYNC_TICKET_SECRET:?set a long random ticket secret}
       SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:?set a separate long random internal secret}
-      TLDRAW_SYNC_OFFICIAL_ENABLED: "1"
       TLDRAW_SCHEMA_VERSION: ${TLDRAW_SCHEMA_VERSION:-oc-tldraw-2}
     ports: !reset []
 
@@ -64,7 +63,6 @@ services:
       dockerfile: deploy/Dockerfile.frontend
       args:
         VITE_TLDRAW_LICENSE_KEY: ${VITE_TLDRAW_LICENSE_KEY:-}
-        VITE_TLDRAW_OFFICIAL_SYNC: ${VITE_TLDRAW_OFFICIAL_SYNC:-1}
     depends_on:
       backend: { condition: service_started }
       sync-service: { condition: service_started }

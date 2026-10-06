@@ -1,76 +1,116 @@
 # 未定之书 · ProjectOC
 
-基于 Django REST Framework + Vue 3 的单人、本地 OC 世界观设定工作台。
+**把角色、世界规则与故事灵感，整理成可审核、可追溯的世界观。**
 
-## 启动
+ProjectOC 是面向原创角色（Original Character，OC）创作者的自托管工作台。你可以在无限画布上整理设定，通过 AI 对话完善想法，再把审核后的草稿纳入正式世界观，与受邀成员一起编辑。
 
-### 本地开发
+[快速启动](#快速启动) · [功能](#功能) · [文档](#文档) · [参与开发](CONTRIBUTING.md) · [MIT 许可](LICENSE)
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r backend/requirements.txt
-python backend/manage.py migrate
-python backend/manage.py runserver
-cd frontend && npm install && npm run dev
+> 当前处于开发阶段，适用于本地使用和私有网络协作。画布统一使用官方 TLDraw 同步；旧 `records-v1` 已退役。正式部署仍需完成许可、HTTPS/WSS 和备份恢复验收。
+
+## 工作方式
+
+```text
+画布整理灵感 → AI 对话与草稿提案 → 人工编辑和审核 → 正式实体与关系
+                                                       ↓
+                                              Git 历史 · 图谱 · 时间轴
 ```
 
-没有 `OPENAI_API_KEY` 时，后端使用离线规则演示模式：它仍然会把用户输入放入提案，不会写入正式实体。
+AI 生成内容先进入提案，审核后才成为正式设定。PostgreSQL 保存正式数据，Git 记录世界观内容历史，Neo4j 提供可重建的图谱投影。
 
-Neo4j 只用于高级图谱投影，不是事实源；Compose 会等待 Neo4j healthcheck 后再启动后端。要运行真实联调测试：
+## 功能
 
-```bash
-docker compose exec -T -e RUN_NEO4J_INTEGRATION=1 backend python manage.py test tests.test_neo4j_integration
-```
+| 功能 | 可以做什么 |
+| --- | --- |
+| 无限画布 | 整理 Markdown、LaTeX、Mermaid 和实体草稿，使用手绘、箭头与便签 |
+| AI 对话 | 使用兼容 OpenAI 接口的模型服务，流式回复、整理提案和维护工作记忆 |
+| 提案审核 | 编辑实体与关系、查看提交前差异，确认后纳入正式世界观 |
+| 知识图谱 | 查看关系、出链和反向链接，分析最短路径与影响范围 |
+| 时间体系 | 定义日历和时间换算，查看事件、人物生命周期及时间切片 |
+| 分支与历史 | 在工作分支中探索设定，审核三方合并差异，查看 Git 历史与时间轴版本差异 |
+| 私有协作 | 邀请 owner/editor/reader 成员，通过官方 TLDraw 同步共享画布 |
+| 维护与恢复 | 查看同步、Git 和投影任务状态，重试失败任务，备份与恢复数据 |
 
-### Docker Compose
+没有配置模型 API 密钥时，AI 对话使用离线规则演示模式。它用于体验提案流程，不具备在线模型的生成能力。
 
-```bash
-cp .env.example .env
-# 如需上游 AI，再编辑 .env 写入 OPENAI_API_KEY
-# .env 只保存在本地，禁止提交
- docker compose up --build
-```
+## 快速启动
 
-- 前端：`http://localhost:${FRONTEND_PORT:-5173}`
-- 后端健康检查：`http://localhost:${BACKEND_PORT:-8000}/health/`
-- API：`http://localhost:8000/api/v1/`
-
-## 当前实现范围
-
-- 无限画布：TLDraw React 适配器挂载到 Vue，支持 Markdown、LaTeX、Mermaid、实体草稿；TLDraw 原生手绘、箭头、便签工具保留。
-- AI 产婆对话：SSE 流式回复，OpenAI-compatible 服务动态模型列表；离线 fallback；AI 内容先进入提案。
-- 审核流程：提案编辑、关系选择、冲突提示、提交前 diff、幂等提交；数据库确认后排队 Git 同步。
-- 正式世界观：实体、关系、出链、反向链接、Cytoscape 图谱、Git 历史/diff、失败任务重试。
-- M6 协作：账户与 owner/editor/reader 权限、邀请、画布工作分支与合并、Neo4j 可重建投影，以及自托管 WebSocket 协作。新画布在 `TLDRAW_SYNC_OFFICIAL_ENABLED=1` 且 schema 协商通过时使用官方 `tldraw-sync-v2`（`TLSocketRoom` / `SQLiteSyncStorage`）画布级 CRDT；`records-v1` 仅保留给旧画布迁移、回滚和异常降级。
-- Agent 长期记忆：记忆按 workspace/branch 隔离，正式事实与待审核草稿分层；用户可编辑工作笔记、归档/恢复非阻塞问题，并通过版本号和审计记录追踪变更。
-- 分支合并审核：支持三方字段差异预览、非冲突字段自动合并、逐字段选择 main/branch，以及用户编辑最终字段值；AI 合并建议只作为可审核建议，不会自动写入。
-- 数据库与 Git：PostgreSQL 是事实源；世界观内容存入 `world_repos/<slug>-<id>/`，应用源码与内容仓库分离。
-- Git 恢复：可用 `python backend/manage.py reconcile_commit_jobs --workspace <workspace-id>` 检查 marker commit；加 `--retry` 会重放没有 marker 的可恢复任务；`/api/v1/workspaces/{id}/git/status/` 提供分支 ref、基线和待处理任务状态。版本与维护页现在会汇总 Git、同步任务和 Neo4j 投影健康状态，并支持请求投影重建。
-- 高级图谱：图谱详情支持最短路径和影响范围分析，优先使用 Neo4j、不可用时明确回退 PostgreSQL；结果带有来源标记。
-- Neo4j 联调：`backend/tests/test_neo4j_integration.py` 提供真实 Neo4j 的 branch 投影、路径、影响分析和幂等 rebuild 测试；在 Compose 网络内以 `RUN_NEO4J_INTEGRATION=1` 显式运行。
-
-## 当前限制与生产前置条件
-
-- 时间系统、时间切片人物生命周期已在后端完成；现在支持显式有向时间体系换算、可组合精确转换、时间体系编辑器、可视化时间轴、事件/人物生命周期条带、范围滑块和切片游标。时间体系新增确定性的 variable-months 日历规则、闰日、纪元和无零年显示，并随 Git 快照导出；TimelinePanel 支持 commit/snapshot 双版本只读 Diff，展示事件新增/删除/移动、参与者、生命周期、关系有效期和时间体系 warning，并可定位证据。
-- `records-v1` 旧路径仍提供单条 put/remove、字段级确定性 LWW、删除 tombstone、幂等去重和离线回放；它不是完整 CRDT。新画布使用官方 `tldraw-sync-v2` 时，SQLite 只保存同步协议 journal/cache，PostgreSQL durable snapshot/event、room clock 和重建结果仍是领域事实源；Redis 仅作实时广播，room lease 防止同一房间双主。光标/选区和在线成员通过 presence 广播。
-- 自托管协作只适用于私有网络。生产必须使用 HTTPS/WSS 反向代理、强随机且独立的 `SYNC_TICKET_SECRET` / `SYNC_INTERNAL_SECRET`、数据库/Git/快照备份，以及有效 TLDraw 生产许可。不要使用公开演示同步服务器。
-- Compose 默认端口绑定到 `127.0.0.1`；部署到私有网络前仍需配置 `DEBUG=0`、允许主机、可信代理和安全 Cookie。实体和关系正式写入仅允许通过审核提案提交流程。
-
-### 私有网络协作部署示例
-
-`deploy/` 提供 HTTPS/WSS Nginx 配置、生产 Compose override 和环境变量模板：先将 `deploy/.env.production.example` 配置复制到根 `.env` 并填写独立密钥、私有域名、证书目录及有效 TLDraw 生产许可，再按 `deploy/README.md` 启动。当前新画布实时协议在官方开关打开时使用 `tldraw-sync-v2`；`records-v1` 仅用于旧画布和降级。官方房间会将 CRDT snapshot、document clock、schema/protocol metadata 和 durable sync event 写入 PostgreSQL，并在 SQLite journal 与 durable hash/clock 不一致时重建；生产启用前仍必须通过有效 TLDraw license、HTTPS/WSS、备份恢复和 credentialed 多浏览器验收。
-
-### Durable outbox worker
-
-Git 同步和 Neo4j 投影现在由可重试的持久化 outbox worker 处理。Compose 会启动独立的 `outbox-worker` 服务；任务使用 PostgreSQL lease 防止重复领取，并按指数退避重试：
+需要安装 Docker 和支持 `--wait` 的 Docker Compose。以下命令在仓库根目录执行：
 
 ```bash
-# 手动处理一批任务
-python backend/manage.py run_outbox_worker --once
+git clone https://github.com/HeDaas-Code/ProjectOC.git
+cd ProjectOC
 
-# 私有部署中持续运行（Compose 已自动配置）
-python backend/manage.py run_outbox_worker --loop --interval 5 --limit 20
+# 已有 .env 时保留原配置；按需填写模型服务和本地端口。
+[ -f .env ] || cp .env.example .env
+
+docker compose up -d --build --wait --wait-timeout 180
 ```
 
-任务达到 `OUTBOX_MAX_ATTEMPTS` 后会保留失败状态，必须由维护人员检查错误并显式重试；数据库确认内容不会因为 Git 或 Neo4j 暂时不可用而回滚。
+首次构建需要下载镜像与依赖。Compose 会启动 PostgreSQL、Redis、Neo4j、后端、画布同步服务、前端和后台任务 worker。
+
+| 地址 | 用途 |
+| --- | --- |
+| [localhost:5173](http://localhost:5173/) | 工作台；首次使用创建 Owner，之后通过邀请加入成员 |
+| [localhost:8000/health/](http://localhost:8000/health/) | 后端健康检查 |
+| [localhost:8787/health](http://localhost:8787/health) | 画布同步协议、房间与持久化状态 |
+
+端口默认只绑定 `127.0.0.1`。可通过 `.env` 中的 `FRONTEND_PORT`、`BACKEND_PORT` 和 `SYNC_PORT` 调整；前端端口变化时也要更新 CORS、CSRF 和 WebSocket origin 配置，同步端口变化时更新 `SYNC_SERVICE_URL`。
+
+常用命令：
+
+```bash
+docker compose ps
+docker compose logs --tail=100 backend sync-service outbox-worker
+
+# 更新镜像并重新启动
+docker compose up -d --build --wait --wait-timeout 180
+
+# 停止服务，保留数据库卷和世界观文件
+docker compose down
+```
+
+`docker compose down -v` 会删除数据库卷，不用于普通停止或升级。世界观内容保存在 `world_repos/`，请与数据库一起备份。
+
+## 架构与目录
+
+| 部分 | 技术与职责 |
+| --- | --- |
+| 前端 | Vue 3、TypeScript、Pinia、Vite；通过 React 适配 TLDraw |
+| 后端 | Django REST Framework；账户权限、世界观数据、提案审核与 AI 编排 |
+| 同步服务 | Node.js、WebSocket、官方 `TLSocketRoom` / `SQLiteSyncStorage` |
+| 数据与任务 | PostgreSQL、Redis 房间租约、Git 内容仓库、Neo4j 图谱投影、持久化 outbox worker |
+
+```text
+ProjectOC/
+├── backend/        # Django 应用、迁移与测试
+├── frontend/       # Vue 工作台、TLDraw 适配与浏览器测试
+├── sync-service/   # 官方画布同步与历史数据迁移
+├── deploy/         # 私有部署、备份恢复与 staging 脚本
+├── docs/           # 当前指南与归档设计文档
+└── world_repos/    # 本地世界观内容仓库，内容不提交到应用源码仓库
+```
+
+架构和一致性边界见 [架构说明](docs/architecture.md)。
+
+## 当前限制
+
+- 实时连接成功不代表 PostgreSQL 已落盘；升级和备份前应检查同步服务的 `pending_persistence` 与 `last_error`。
+- 画布自动同步不等于所有并发文本修改都能无损合并。长期离线、强制终止进程和数据库故障等场景仍需专项验收。
+- 旧协议仅保留历史快照与操作日志的只读迁移能力，不提供实时连接或降级；旧浏览器未发送的操作需导出后人工核对。
+- 默认 Compose 是本地开发配置。私有部署需使用 HTTPS/WSS、独立密钥、数据库与 Git 备份，以及有效的 TLDraw 生产许可。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [文档索引](docs/README.md) | 按使用、开发、部署和历史资料查找 |
+| [开发指南](docs/development.md) | 本地开发、依赖安装和测试命令 |
+| [架构说明](docs/architecture.md) | 模块职责、数据源与同步流程 |
+| [部署与运维](deploy/README.md) | HTTPS/WSS、配置、备份与恢复 |
+| [旧协议升级](docs/migration.md) | `records-v1` 退役、历史数据与本地备份 |
+| [同步服务](sync-service/README.md) | 官方房间协议、租约和健康检查 |
+
+## 许可
+
+项目源码使用 [MIT License](LICENSE)。第三方依赖、模型服务与 TLDraw 生产许可按各自条款使用。

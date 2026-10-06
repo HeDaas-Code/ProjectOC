@@ -21,6 +21,5 @@ if [[ -n "${VITE_TLDRAW_LICENSE_KEY:-}" ]]; then
 else
   record license-configured SKIP "manual TLDraw license gate; set VITE_TLDRAW_LICENSE_KEY before production"
 fi
-if [[ "${TLDRAW_SYNC_OFFICIAL_ENABLED:-0}" == "1" ]]; then record official-crdt-enabled PASS "tldraw-sync-v2 enabled"; else record official-crdt-enabled SKIP "official CRDT feature flag is disabled"; fi
 finalize_report
 printf 'staging started\nreport=%s\n' "$REPORT_DIR"

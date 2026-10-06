@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requestDialog, confirmAction } from '../services/dialog'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import { api } from '../services/api'
@@ -256,8 +257,8 @@ async function loadSlice() {
   } catch (error) { emit('error', String(error)) }
 }
 async function createSystem() {
-  const name = prompt('时间体系名称'); if (!name?.trim()) return
-  const unit = prompt('最小计量单位', '日') || 'tick'
+  const choice = await requestDialog({ title: '创建时间体系', confirmLabel: '创建体系', fields: [{ key: 'name', label: '时间体系名称', placeholder: '例如：王历' }, { key: 'unit', label: '最小计量单位', value: '日' }] }); if (!choice) return
+  const { name, unit } = choice
   try { const created = await api<TimeSystem>('time-systems/', 'POST', { workspace: props.workspace, name: name.trim(), unit_name: unit, units: [], display_format: `{value} ${unit}` }); selectedSystem.value = created.id; await refresh() } catch (error) { emit('error', String(error)) }
 }
 async function saveLifespan() {
@@ -274,7 +275,7 @@ function resetEventForm() { selectedEventId.value = ''; timelineEntity.value = '
 function editEvent(entry: TimelineEntry) { selectedEventId.value = entry.id; timelineEntity.value = entry.timeline; eventEntity.value = entry.event; eventAt.value = Number(entry.start_value); eventEnd.value = entry.end_value === null ? undefined : Number(entry.end_value); participants.value = (entry.participant_details || []).map(item => item.id); participantRoles.value = Object.fromEntries((entry.participant_details || []).map(item => [item.id, item.role || ''])) }
 function cancelEventEdit() { resetEventForm() }
 async function deleteEvent(entry: TimelineEntry) {
-  if (!confirm(`确认从当前${props.branch === 'main' ? '主线' : '分支'}时间线移除“${entry.event_title}”？`)) return
+  if (!await confirmAction(`从当前${props.branch === 'main' ? '主线' : '分支'}时间线移除“${entry.event_title}”？`, '移除时间线事件', '移除事件')) return
   try { await api(`timeline-entries/${entry.id}/?${query()}`, 'DELETE'); if (selectedEventId.value === entry.id) resetEventForm(); await refresh() } catch (error) { emit('error', String(error)) }
 }
 async function saveEvent() {

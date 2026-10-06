@@ -16,9 +16,7 @@ export function verifyTicket(token, secret, now = Math.floor(Date.now() / 1000))
   let payload
   try { payload = JSON.parse(decode(encoded).toString('utf8')) } catch { throw new Error('invalid ticket payload') }
   if (payload.v !== 1 || !payload.sub || !payload.workspace || !payload.canvas || !payload.role || !payload.client_id || payload.exp <= now) throw new Error('expired or invalid ticket')
-  // Old tickets predate branch-scoped rooms. They remain valid only for the
-  // legacy transport; callers selecting the official room must require an
-  // explicit branch before connecting.
+  // Room connection additionally requires an explicit signed branch claim.
   if (payload.branch !== undefined && (typeof payload.branch !== 'string' || !payload.branch)) throw new Error('invalid branch claim')
   if (!['owner', 'editor', 'reader'].includes(payload.role)) throw new Error('invalid role')
   return payload

@@ -1379,111 +1379,32 @@ class CanvasOperationLogTests(TestCase):
             "record": {"id": f"shape:{op_id}", "typeName": "shape", "text": text},
         }
 
-    def test_sync_ops_requires_internal_secret_and_persists_idempotently(self):
+    def test_retired_writes_do_not_mutate_historical_state(self):
         self.assertEqual(self.client.get(f"/api/v1/canvases/{self.canvas_id}/sync-ops/").status_code, 403)
-        operation = self.put("op-1", 1, "first")
-        created = self.internal("post", data={"operations": [operation]})
-        self.assertEqual(created.status_code, 200, created.data)
-        self.assertEqual(created.data["cursor"], 1)
-        self.assertEqual(CanvasOperation.objects.filter(canvas_id=self.canvas_id).count(), 1)
-
-        duplicate = self.internal("post", data={"operations": [operation]})
-        self.assertEqual(duplicate.status_code, 200, duplicate.data)
-        self.assertEqual(duplicate.data["cursor"], 1)
-        self.assertEqual(CanvasOperation.objects.filter(canvas_id=self.canvas_id).count(), 1)
-
-        conflicting = {**operation, "record": {**operation["record"], "text": "different"}}
-        conflict = self.internal("post", data={"operations": [conflicting]})
-        self.assertEqual(conflict.status_code, 409, conflict.data)
-
-    def test_sync_ops_order_limit_replay_and_operation_cursor(self):
-        first = self.internal("post", data={"operations": [self.put("op-1", 1, "first"), self.put("op-2", 2, "second")]})
-        self.assertEqual(first.status_code, 200, first.data)
-        self.assertEqual(first.data["cursor"], 2)
-
-        limited = self.internal("get", suffix="?after=0&limit=1")
-        self.assertEqual(limited.status_code, 200, limited.data)
-        self.assertEqual([item["sequence"] for item in limited.data["operations"]], [1])
-        self.assertTrue(limited.data["has_more"])
-        rest = self.internal("get", suffix="?after=1&limit=10")
-        self.assertEqual([item["sequence"] for item in rest.data["operations"]], [2])
-        self.assertFalse(rest.data["has_more"])
-
-        state = self.client.get(
+        response = self.internal("post", data={"operations": [self.put("one", 1, "old")]})
+        self.assertEqual(response.status_code, 410)
+        self.assertFalse(CanvasOperation.objects.filter(canvas_id=self.canvas_id).exists())
+        rejected = self.client.post(
             f"/api/v1/canvases/{self.canvas_id}/sync-state/",
-            HTTP_X_SYNC_INTERNAL_SECRET=self.secret,
+            {"snapshot": {}, "expected_version": 1, "sync_metadata": {"protocol": "records-v1"}},
+            format="json", HTTP_X_SYNC_INTERNAL_SECRET=self.secret,
         )
-        self.assertEqual(state.status_code, 200, state.data)
-        self.assertEqual(state.data["operation_cursor"], 2)
+        self.assertEqual(rejected.status_code, 410)
+        self.assertEqual(StagingCanvas.objects.get(pk=self.canvas_id).snapshot_version, 1)
 
-    def test_snapshot_checkpoint_and_operation_log_compaction_are_safe(self):
-        for index in range(1, 6):
-            response = self.internal("post", data={"operations": [self.put(f"op-{index}", index, f"text-{index}")]})
-            self.assertEqual(response.status_code, 200, response.data)
-
-        state_endpoint = f"/api/v1/canvases/{self.canvas_id}/sync-state/"
-        headers = {"HTTP_X_SYNC_INTERNAL_SECRET": self.secret}
-        saved = self.client.post(
-            state_endpoint,
-            {
-                "snapshot": {"document": {"store": {"shape:op-5": {"id": "shape:op-5", "typeName": "shape"}}}},
-                "sync_metadata": {"protocol": "records-v1"},
-                "expected_version": 1,
-                "operation_cursor": 5,
-            },
-            format="json",
-            **headers,
-        )
-        self.assertEqual(saved.status_code, 200, saved.data)
-        self.assertEqual(saved.data["snapshot_operation_cursor"], 5)
-
-        compact = self.client.post(
-            f"/api/v1/canvases/{self.canvas_id}/compact-ops/",
-            {"through": 5, "keep_last": 2},
-            format="json",
-            **headers,
-        )
-        self.assertEqual(compact.status_code, 200, compact.data)
-        self.assertEqual(compact.data["compacted_through"], 3)
-        self.assertEqual(compact.data["deleted"], 3)
-        self.assertEqual(CanvasOperation.objects.filter(canvas_id=self.canvas_id).count(), 2)
-        replay = self.internal("get", suffix="?after=0&limit=20")
-        self.assertEqual([item["sequence"] for item in replay.data["operations"]], [4, 5])
-        self.assertEqual(replay.data["compacted_through"], 3)
-
-    def test_compaction_never_deletes_operations_not_in_checkpoint(self):
+    def test_historical_operations_remain_readable_for_migration(self):
         for index in range(1, 3):
-            response = self.internal("post", data={"operations": [self.put(f"lag-{index}", index, f"text-{index}")]})
-            self.assertEqual(response.status_code, 200, response.data)
-        state_endpoint = f"/api/v1/canvases/{self.canvas_id}/sync-state/"
-        headers = {"HTTP_X_SYNC_INTERNAL_SECRET": self.secret}
-        saved = self.client.post(
-            state_endpoint,
-            {"snapshot": {"document": {"store": {}}}, "expected_version": 1, "operation_cursor": 1},
-            format="json",
-            **headers,
-        )
-        self.assertEqual(saved.status_code, 200, saved.data)
-        compact = self.client.post(
-            f"/api/v1/canvases/{self.canvas_id}/compact-ops/",
-            {"through": 2, "keep_last": 0},
-            format="json",
-            **headers,
-        )
-        self.assertEqual(compact.status_code, 200, compact.data)
-        self.assertEqual(compact.data["compacted_through"], 1)
-        self.assertEqual(list(CanvasOperation.objects.filter(canvas_id=self.canvas_id).values_list("sequence", flat=True)), [2])
-
-    def test_sync_ops_rejects_invalid_and_archived_canvas(self):
-        invalid_put = self.internal("post", data={"operations": [{"kind": "put", "clientId": "a", "clock": 1, "opId": "bad", "record": {}}]})
-        self.assertEqual(invalid_put.status_code, 400)
-        invalid_remove = self.internal("post", data={"operations": [{"kind": "remove", "clientId": "a", "clock": 1, "opId": "bad-remove"}]})
-        self.assertEqual(invalid_remove.status_code, 400)
-        canvas = StagingCanvas.objects.get(pk=self.canvas_id)
-        canvas.status = StagingCanvas.Status.ARCHIVED
-        canvas.save(update_fields=["status"])
-        archived = self.internal("post", data={"operations": [self.put("archived", 1, "nope")]})
-        self.assertEqual(archived.status_code, 409)
+            CanvasOperation.objects.create(canvas_id=self.canvas_id, sequence=index,
+                op_id=f"op-{index}", client_id="client-a", clock=index,
+                operation=self.put(f"op-{index}", index, str(index)))
+        StagingCanvas.objects.filter(pk=self.canvas_id).update(operation_sequence=2)
+        page = self.internal("get", suffix="?after=0&limit=1")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.data["operations"][0]["sequence"], 1)
+        self.assertTrue(page.data["has_more"])
+        rest = self.internal("get", suffix="?after=1")
+        self.assertEqual(rest.data["operations"][0]["sequence"], 2)
+        self.assertFalse(rest.data["has_more"])
 
 
 class TimeSystemConversionTests(TestCase):
@@ -1718,13 +1639,10 @@ class CanvasOperationCompactionCommandTests(TestCase):
             }
             for index in range(1, count + 1)
         ]
-        response = self.client.post(
-            f"/api/v1/canvases/{self.canvas_id}/sync-ops/",
-            {"operations": operations},
-            HTTP_X_SYNC_INTERNAL_SECRET=self.secret,
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200, response.data)
+        for index, operation in enumerate(operations, 1):
+            CanvasOperation.objects.create(canvas_id=self.canvas_id, sequence=index,
+                op_id=operation["opId"], client_id=operation["clientId"], clock=operation["clock"], operation=operation)
+        StagingCanvas.objects.filter(pk=self.canvas_id).update(operation_sequence=count)
 
     def test_management_command_compacts_only_checkpointed_operations(self):
         self._append(6)
