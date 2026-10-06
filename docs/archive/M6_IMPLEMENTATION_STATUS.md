@@ -1,4 +1,4 @@
-> 当前版本变更：records-v1 已退役。以下内容为历史实现记录，旧协议兼容、回滚和降级描述不再适用。当前运行方式见 README.md。
+> 当前版本变更：records-v1 已退役。以下内容为历史实现记录，旧协议兼容、回滚和降级描述不再适用。当前运行方式见 [项目 README](../../README.md)。
 
 # M6 implementation status
 
