@@ -23,7 +23,7 @@ docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --b
 - 备份 PostgreSQL、`world_repos/`、画布快照和 Neo4j（Neo4j 可重建，但备份仍建议保留）。
 - 轮换三个密钥时同时重启 backend 和 sync-service；旧 ticket 会自然过期。
 - 监控 `/health/` 和 sync-service `/health`，并为 Git/图谱投影失败任务安排重试。
-- 生产协作路径在 `TLDRAW_SYNC_OFFICIAL_ENABLED=1` 且前后端 schema 一致时使用 `tldraw-sync-v2`（官方 `TLSocketRoom` / `SQLiteSyncStorage`）；`records-v1` 仅作为旧画布迁移、回滚和异常降级协议保留。完整生产启用仍必须通过备份恢复演练、两浏览器断线重连测试和有效 TLDraw license 门禁。
+- 所有画布统一使用 `tldraw-sync-v2`（官方 `TLSocketRoom` / `SQLiteSyncStorage`），`records-v1` 已退役，无协议开关或异常降级。旧内容通过只读快照/日志导入。生产启用仍必须通过备份恢复、两浏览器断线重连及有效 TLDraw license 验收。
 
 ## 备份与恢复
 
