@@ -1,51 +1,110 @@
-# ProjectOC 自托管协作部署
+# 私有部署与运维
 
-这是私有网络部署示例，不是公共 SaaS 配置。边缘 Nginx 负责 HTTPS、静态前端、Django `/api/` 和自托管同步服务 `/rooms/` 的 WebSocket 代理。
+[返回项目首页](../README.md) · [架构说明](../docs/architecture.md) · [升级指南](../docs/migration.md)
 
-## 启动
+此配置用于私有网络部署。边缘 Nginx 提供 HTTPS、静态前端、Django `/api/` 与官方画布同步 `/rooms/` WebSocket 代理。默认绑定 localhost；若由本机直接提供私网入口，按实际私网接口修改绑定地址。
 
-1. 将 `deploy/.env.production.example` 复制为根目录 `.env`，设置私有 DNS、证书目录和三个彼此独立的随机密钥。
-2. 将 `VITE_TLDRAW_LICENSE_KEY` 设置为有效的生产许可；没有许可不要把画布协作部署到生产环境。
-3. 确保证书目录包含 `fullchain.pem` 和 `privkey.pem`，并确认 Docker 用户可读。
-4. 启动：
+## 配置与启动
+
+1. 备份已有 `.env`，将 [生产模板](.env.production.example) 复制到根目录 `.env`，填写所有必填空值。已有数据库卷继续使用原数据库密码。
+2. 分别生成数据库、Neo4j、Django、同步票据及内部服务密码或密钥。`WORKSPACE_CREDENTIALS_KEY` 用于加密工作区模型凭据，须保持稳定并安全保存。
+3. 设置私有域名、匹配的 HTTPS origin，以及浏览器可访问的 `SYNC_SERVICE_URL=wss://你的域名`。
+4. 设置 `TLS_CERT_DIR` 为包含 `fullchain.pem` 和 `privkey.pem` 的绝对目录，Docker 用户须可读。
+5. 填写有效 `VITE_TLDRAW_LICENSE_KEY`，然后校验并启动：
 
 ```bash
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+# 在仓库根目录执行；生产模板的 COMPOSE_FILE 已包含生产 override。
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 180
+docker compose ps
 ```
 
-5. 默认端口只绑定 localhost，适合本机/同主机 TLS 入口；若此 Nginx 主机本身就是私有网络 TLS 边缘，才将 `HTTPS_BIND`/`HTTP_BIND` 改为该私网接口地址，并用防火墙限制来源。不要直接绑定公网接口。不要暴露 Django、PostgreSQL、Redis、Neo4j 或 sync-service 端口。
+也可明确指定配置文件：
 
-该示例会强制配置 PostgreSQL、Neo4j、Django、ticket 和内部服务的独立强密码/密钥。`SYNC_SERVICE_URL` 必须是浏览器可访问的 `wss://` 地址，而不是 Docker 内部的 `ws://sync-service:8787`。`SYNC_ALLOWED_ORIGINS` 必须与浏览器地址的 `https://host` 完全一致。`SYNC_REDIS_URL` 应指向私有 Redis；Redis 只负责多实例实时传播，PostgreSQL durable operation log 才是恢复事实源。反向代理必须保留 WebSocket Upgrade/Connection 头。
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+  up -d --build --wait --wait-timeout 180
+```
 
-## 运维前置条件
+不要提交 `.env` 或证书私钥。更新模板不应覆盖运行环境的密钥，尤其是数据库密码和工作区凭据加密密钥。
 
-- `DJANGO_DEBUG=0`、显式 `DJANGO_ALLOWED_HOSTS` 和 HTTPS secure cookies。
-- 备份 PostgreSQL、`world_repos/`、画布快照和 Neo4j（Neo4j 可重建，但备份仍建议保留）。
-- 轮换三个密钥时同时重启 backend 和 sync-service；旧 ticket 会自然过期。
-- 监控 `/health/` 和 sync-service `/health`，并为 Git/图谱投影失败任务安排重试。
-- 所有画布统一使用 `tldraw-sync-v2`（官方 `TLSocketRoom` / `SQLiteSyncStorage`），`records-v1` 已退役，无协议开关或异常降级。旧内容通过只读快照/日志导入。生产启用仍必须通过备份恢复、两浏览器断线重连及有效 TLDraw license 验收。
+## 关键配置
+
+| 配置 | 要求 |
+| --- | --- |
+| `DJANGO_ALLOWED_HOSTS` | 实际私有域名；保留 localhost/127.0.0.1 供容器健康检查 |
+| `CORS_ALLOWED_ORIGINS` / `CSRF_TRUSTED_ORIGINS` | 浏览器地址的完整 HTTPS origin |
+| `SYNC_ALLOWED_ORIGINS` | 与浏览器 HTTPS origin 一致 |
+| `SYNC_SERVICE_URL` | 浏览器可访问的 WSS 地址，不使用 Docker 内部主机名 |
+| `SYNC_TICKET_SECRET` / `SYNC_INTERNAL_SECRET` | 两个独立随机值，后端与同步服务保持一致 |
+| `TLS_CERT_DIR` | 证书目录；证书应覆盖使用的域名 |
+| `HTTPS_BIND` / `HTTP_BIND` | 默认 localhost，仅按实际私网入口调整 |
+
+生产 override 设置 `DJANGO_DEBUG=0`、安全 Cookie 和可信代理头，并隐藏后端与同步服务的直连端口。不要暴露 PostgreSQL、Redis、Neo4j 或内部同步接口。代理须保留 WebSocket Upgrade/Connection 头。
+
+Redis 协调房间租约，PostgreSQL 的快照和同步事件是领域恢复事实源。`records-v1` 已退役，无协议开关或自动降级。
+
+## 健康检查与后台任务
+
+```bash
+docker compose logs --tail=100 backend sync-service outbox-worker
+
+# 从容器内读取同步服务健康状态
+docker compose exec -T sync-service node -e \
+  "fetch('http://127.0.0.1:8787/health').then(r=>r.json()).then(console.log)"
+
+# 手动处理一批 Git 与 Neo4j 任务
+docker compose exec -T backend python manage.py run_outbox_worker --once
+
+# 检查某个工作区的 Git 同步；需要重试时再加 --retry
+docker compose exec -T backend python manage.py reconcile_commit_jobs \
+  --workspace WORKSPACE_UUID
+```
+
+将 `WORKSPACE_UUID` 替换为实际工作区 UUID。后端健康检查为 `/health/`。同步健康检查会报告官方协议、房间租约、reconciliation、`pending_persistence`、`durable_document_clock` 和 `last_error`。前端显示“已连接”不等于数据库已落盘；重启、升级和备份前应确认持久化状态。
+
+Compose 自动启动 `outbox-worker`。Git/Neo4j 任务使用数据库租约与指数退避；达到 `OUTBOX_MAX_ATTEMPTS` 后保留失败状态，需要检查原因并显式重试。
 
 ## 备份与恢复
 
-`deploy/backup.sh` 会生成一个带时间戳的备份目录，包含：
-
-- PostgreSQL custom dump（运行时事实源，包含画布快照、操作日志、实体、关系、成员和时间线）；
-- 用于检查和 SQLite 恢复演练的 Django fixture；
-- `world_repos/` 全部 Git 历史；
-- `manifest.json` 与 SHA-256 校验文件。
-
-Neo4j 不作为事实源写入备份；恢复 PostgreSQL 后必须重建 Neo4j projection。备份脚本不会把密钥写入归档。
+备份前停止编辑流量，并等待画布持久化和后台任务完成。脚本备份 PostgreSQL、Django fixture、世界观 Git 仓库与校验清单；Neo4j 可从正式数据重建，未纳入该脚本的事实源备份。
 
 ```bash
 ./deploy/backup.sh
-# 或指定目录
+
+# 指定新的备份目录
 ./deploy/backup.sh /secure/backup/projectoc-before-upgrade
-
-# 恢复是破坏性操作，必须显式确认
-CONFIRM_RESTORE=YES ./deploy/restore.sh /secure/backup/projectoc-before-upgrade
-
-# staging 脚本会自动选择 projectoc-staging Compose 项目，避免误操作开发环境
-STAGING_RESTORE_ISOLATED=1 ./deploy/staging-backup-restore.sh
 ```
 
-恢复前应停止写入流量，并在隔离环境先做一次恢复演练。`restore.sh` 会把现有 `world_repos/` 改名为带时间戳的 `.pre-restore-*` 目录，以便人工回滚；PostgreSQL 恢复前必须确认备份校验通过。
+若通过 Compose override 挂载了其他内容目录，必须指明实际路径：
+
+```bash
+WORLD_REPOS_ROOT=/actual/path/world_repos ./deploy/backup.sh
+```
+
+密钥不会写入备份归档，须单独安全保存。尤其是 `WORKSPACE_CREDENTIALS_KEY`，丢失后无法解密原工作区模型凭据。
+
+恢复会替换数据库内容，应先在隔离环境演练：
+
+```bash
+# 确认目标环境与备份校验后执行
+CONFIRM_RESTORE=YES ./deploy/restore.sh /secure/backup/projectoc-before-upgrade
+```
+
+自定义内容路径恢复时设置 `RESTORE_WORLD_REPOS_ROOT`。恢复脚本保留原目录为带时间戳的 `.pre-restore-*`，迁移数据库后仍需检查画布恢复、Git 状态并重建 Neo4j 投影。
+
+日常停止使用 `docker compose down`；不要在普通升级中添加 `-v` 删除数据卷。
+
+## 隔离 staging 验收
+
+脚本默认使用独立的 `projectoc-staging` Compose 项目与数据卷，生成本地测试证书。它们用于验收，不代表真实生产证书或厂商许可已经通过。
+
+```bash
+./deploy/staging-up.sh
+./deploy/staging-verify.sh
+STAGING_RESTORE_ISOLATED=1 ./deploy/staging-backup-restore.sh
+./deploy/staging-failure-drill.sh
+./deploy/staging-down.sh
+```
+
+报告位于 `.staging-reports/`。运行前确认测试端口、Compose 项目名与目标目录，避免与开发环境端口冲突。生产启用还需有效 TLDraw license、真实 HTTPS/WSS、多浏览器权限与断网重连、备份恢复验收。
