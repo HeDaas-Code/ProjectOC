@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StyledDialog from './StyledDialog.vue'
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { createRoot, type Root } from "react-dom/client";
 import React from "react";
@@ -157,15 +158,12 @@ defineExpose({ flush: async () => {
       <button v-if="legacySnapshot" @click="exportLegacySnapshot">导出旧版本地快照</button>
       <button :disabled="!ready" @click="exportLocal">导出快照</button>
     </footer>
-    <div v-if="editing" class="modal-backdrop">
-      <section class="modal">
-        <h2>编辑 {{ kind }}</h2>
+    <StyledDialog :open="editing" :title="`编辑 ${kind}`" @close="editing = false">
         <textarea v-model="text" rows="12" aria-label="卡片内容" />
         <div class="actions">
           <button @click="editing = false">取消</button
           ><button class="primary" @click="apply">放入画布</button>
         </div>
-      </section>
-    </div>
+    </StyledDialog>
   </section>
 </template>

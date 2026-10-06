@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from '../services/dialog'
 import { computed, ref, watch } from 'vue'
 import { api } from '../services/api'
 
@@ -104,7 +105,7 @@ async function saveSystem() {
   } catch (error) { emit('error', String(error)) } finally { saving.value = false }
 }
 async function deleteSystem(system: TimeSystem) {
-  if (!confirm(`归档时间体系“${system.name}”？其时间事实不会自动删除。`)) return
+  if (!await confirmAction(`归档时间体系“${system.name}”？其时间事实不会自动删除。`, '归档时间体系', '归档体系')) return
   try {
     await api(`time-systems/${system.id}/`, 'DELETE')
     if (props.selectedSystem === system.id) emit('select', props.systems.find(item => item.id !== system.id)?.id || '')
@@ -134,7 +135,7 @@ async function saveConversion() {
   } catch (error) { emit('error', String(error)) } finally { saving.value = false }
 }
 async function deleteConversion(item: Conversion) {
-  if (!confirm(`删除“${item.source_system_name} → ${item.target_system_name}”的换算规则？`)) return
+  if (!await confirmAction(`删除“${item.source_system_name} → ${item.target_system_name}”的换算规则？`, '删除换算规则', '删除规则')) return
   try { await api(`time-system-conversions/${item.id}/`, 'DELETE'); if (editingConversionId.value === item.id) resetConversionForm(); await loadConversions() }
   catch (error) { emit('error', String(error)) }
 }

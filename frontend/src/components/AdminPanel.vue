@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from '../services/dialog'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api } from '../services/api'
 import type { Invite, Membership, Workspace } from '../types'
@@ -50,7 +51,7 @@ async function saveSettings() {
   } catch (error) { emit('error', String(error)) } finally { saving.value = false }
 }
 async function clearApiKey() {
-  if (!canManage.value || !confirm('清除这个工作台的 API Key？')) return
+  if (!canManage.value || !await confirmAction('清除后，将使用服务器配置或离线模式。', '清除 API Key', '清除 Key')) return
   saving.value = true
   try {
     const workspace = await api<Workspace>(`workspaces/${props.workspace.id}/`, 'PATCH', { ai_api_key: '' })
@@ -79,12 +80,12 @@ async function updateRole(member: Membership, event: Event) {
   catch (error) { emit('error', String(error)); await load() }
 }
 async function removeMember(member: Membership) {
-  if (!confirm(`移除 ${member.username}？`)) return
+  if (!await confirmAction(`移除 ${member.username} 后，该成员将失去此工作台的访问权限。`, '移除成员', '移除成员')) return
   try { await api(`members/${props.workspace.id}/${member.user}/`, 'DELETE'); members.value = members.value.filter(item => item.user !== member.user) }
   catch (error) { emit('error', String(error)) }
 }
 async function revokeInvite(invite: Invite) {
-  if (!confirm('撤销这条邀请链接？')) return
+  if (!await confirmAction('撤销后，这条邀请链接将无法继续使用。', '撤销邀请', '撤销邀请')) return
   try { await api(`members/invites/${invite.id}/`, 'DELETE'); invites.value = invites.value.filter(item => item.id !== invite.id) }
   catch (error) { emit('error', String(error)) }
 }

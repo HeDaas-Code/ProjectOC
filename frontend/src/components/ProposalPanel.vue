@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StyledDialog from './StyledDialog.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useWorkbench } from '../stores/workbench'
 import { api } from '../services/api'
@@ -211,16 +212,13 @@ async function commit() {
       <button class="primary" @click="showPreview" :disabled="busy || (!chosen.length && !chosenRelations.length)">预览提交 →</button>
     </footer>
 
-    <div v-if="preview" class="modal-backdrop">
-      <section class="modal wide">
-        <h2>确认这次世界观变更</h2>
+    <StyledDialog v-if="preview" :open="true" title="确认这次世界观变更" :busy="busy" wide @close="preview = undefined">
         <p>只将下面的变更写入正式库，并创建一次 Git 同步任务。</p>
         <pre>{{ preview.diff }}</pre>
         <div class="actions">
           <button :disabled="busy" @click="preview = undefined">返回修改</button>
           <button class="primary" :disabled="busy" @click="commit">{{ busy ? '正在提交…' : '确认提交' }}</button>
         </div>
-      </section>
-    </div>
+    </StyledDialog>
   </div>
 </template>
