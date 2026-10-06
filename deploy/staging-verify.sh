@@ -65,7 +65,6 @@ if [[ "$STAGING_TLS" == "1" ]]; then
 else
   [[ "${SYNC_REQUIRE_ORIGIN:-0}" == "0" ]] && record websocket-origin PASS "origin enforcement disabled for local HTTP development" || record websocket-origin FAIL "local HTTP development expects SYNC_REQUIRE_ORIGIN=0"
 fi
-[[ "${TLDRAW_SYNC_OFFICIAL_ENABLED:-0}" == "1" ]] && record official-crdt-enabled PASS "tldraw-sync-v2 enabled" || record official-crdt-enabled FAIL "official CRDT feature flag is not enabled"
 [[ -n "${TLDRAW_SCHEMA_VERSION:-}" ]] && record tldraw-schema PASS "$TLDRAW_SCHEMA_VERSION" || record tldraw-schema FAIL "TLDRAW_SCHEMA_VERSION is not configured"
 
 if command -v docker >/dev/null 2>&1; then
@@ -85,6 +84,7 @@ if command -v docker >/dev/null 2>&1; then
   else
     health_json="$(curl --silent --show-error --insecure --max-time 10 "${SYNC_HEALTH_URL:-http://127.0.0.1:8787/health}" 2>/dev/null || true)"
   fi
+  if [[ "$health_json" == *'"protocol":"tldraw-sync-v2"'* ]]; then record canvas-sync-protocol PASS "official sync is active"; else record canvas-sync-protocol FAIL "official sync protocol is unavailable"; fi
   if printf '%s' "$health_json" | grep -q 'reconciliation'; then record crdt-reconciliation-health PASS "sync health exposes reconciliation"; else record crdt-reconciliation-health FAIL "sync health does not expose reconciliation"; fi
   if printf '%s' "$health_json" | grep -q 'lease'; then record room-lease-health PASS "sync health exposes room lease"; else record room-lease-health FAIL "sync health does not expose room lease"; fi
 else

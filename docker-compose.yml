@@ -92,10 +92,7 @@ services:
       SYNC_REDIS_PREFIX: ${SYNC_REDIS_PREFIX:-projectoc:sync}
       SYNC_MAX_ROOM_CLIENTS: ${SYNC_MAX_ROOM_CLIENTS:-50}
       SYNC_MAX_MESSAGES_PER_WINDOW: ${SYNC_MAX_MESSAGES_PER_WINDOW:-120}
-      # Local HTTP development uses the official TLDraw CRDT by default.
-      # Keep these explicit here because staging-common.sh is not sourced by
-      # ordinary `docker compose up` commands.
-      TLDRAW_SYNC_OFFICIAL_ENABLED: ${TLDRAW_SYNC_OFFICIAL_ENABLED:-1}
+      # Official TLDraw sync is the only collaboration transport.
       TLDRAW_SCHEMA_VERSION: ${TLDRAW_SCHEMA_VERSION:-oc-tldraw-2}
     depends_on:
       backend: { condition: service_started }
@@ -106,9 +103,6 @@ services:
     depends_on: [backend]
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
-      # Vite reads VITE_* values when the dev server starts. Without this
-      # explicit setting the UI silently falls back to records-v1.
-      VITE_TLDRAW_OFFICIAL_SYNC: ${VITE_TLDRAW_OFFICIAL_SYNC:-1}
       VITE_TLDRAW_LICENSE_KEY: ${VITE_TLDRAW_LICENSE_KEY:-}
     ports: ["127.0.0.1:${FRONTEND_PORT:-5173}:5173"]
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
