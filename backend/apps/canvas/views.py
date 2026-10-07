@@ -135,7 +135,10 @@ class CanvasViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="graph-preview")
     def graph_preview(self, request, pk=None):
         canvas = self._graph_canvas(request, pk)
-        return Response(CanvasCommitService.preview(canvas, [], request.data.get("relation_proposal_ids", [])))
+        try:
+            return Response(CanvasCommitService.preview(canvas, [], request.data.get("relation_proposal_ids", [])))
+        except CanvasCommitError as exc:
+            raise ValidationError(str(exc))
 
     @action(detail=True, methods=["post"], url_path="graph-commit")
     def graph_commit(self, request, pk=None):
