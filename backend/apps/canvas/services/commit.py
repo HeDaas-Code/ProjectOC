@@ -44,6 +44,7 @@ class CanvasCommitService:
         relations = list(
             RelationProposal.objects.filter(canvas=canvas, id__in=relation_ids)
             .select_related(
+                "source_entity",
                 "source_proposal",
                 "source_proposal__created_entity",
                 "target_proposal",
@@ -72,13 +73,18 @@ class CanvasCommitService:
             if relation.workspace_id != canvas.workspace_id or relation.canvas_id != canvas.id:
                 raise CanvasCommitError("关系提案不属于当前画布")
 
-            source = relation.source_proposal
-            if source.workspace_id != canvas.workspace_id or source.canvas_id != canvas.id:
-                raise CanvasCommitError("关系源端点不属于当前画布")
-            if source.id not in selected and not source.created_entity_id:
-                raise CanvasCommitError("请同时选择关系源实体提案，或先提交源实体")
-            if source.created_entity_id and source.created_entity.status != Entity.Status.ACTIVE:
-                raise CanvasCommitError("关系源端点已归档")
+            if relation.source_proposal_id:
+                source = relation.source_proposal
+                if source.workspace_id != canvas.workspace_id or source.canvas_id != canvas.id:
+                    raise CanvasCommitError("关系源端点不属于当前画布")
+                if source.id not in selected and not source.created_entity_id:
+                    raise CanvasCommitError("请同时选择关系源实体提案，或先提交源实体")
+                if source.created_entity_id and source.created_entity.status != Entity.Status.ACTIVE:
+                    raise CanvasCommitError("关系源端点已归档")
+            else:
+                source = relation.source_entity
+                if source is None or source.workspace_id != canvas.workspace_id or source.status != Entity.Status.ACTIVE or source.branch_id not in (None, canvas.branch_id):
+                    raise CanvasCommitError("关系源端点不属于当前分支或已归档")
 
             if relation.target_proposal_id:
                 target = relation.target_proposal
@@ -117,7 +123,7 @@ class CanvasCommitService:
             "relations": [
                 {
                     "proposal_id": str(relation.id),
-                    "source": str(relation.source_proposal_id),
+                    "source": str(relation.source_proposal_id or relation.source_entity_id),
                     "target": str(relation.target_proposal_id or relation.target_entity_id),
                     "type": relation.relation_type,
                     "properties": relation.properties,
@@ -206,8 +212,11 @@ class CanvasCommitService:
 
             for proposal in relation_proposals:
                 proposal.refresh_from_db()
-                proposal.source_proposal.refresh_from_db()
-                source = proposal.source_proposal.created_entity
+                if proposal.source_proposal_id:
+                    proposal.source_proposal.refresh_from_db()
+                    source = proposal.source_proposal.created_entity
+                else:
+                    source = proposal.source_entity
                 if proposal.target_proposal_id:
                     proposal.target_proposal.refresh_from_db()
                     target = proposal.target_proposal.created_entity
@@ -328,4 +337,3 @@ class CanvasCommitService:
         from apps.core.services.outbox_worker import OutboxWorker
 
         return OutboxWorker().run_once(workspace=workspace, include_projection=False)
-

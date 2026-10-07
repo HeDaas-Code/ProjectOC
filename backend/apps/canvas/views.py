@@ -3,7 +3,8 @@ import json
 from typing import ClassVar
 
 from apps.accounts.permissions import accessible_workspace_ids, membership
-from apps.core.models import WorldWorkspace
+from apps.core.models import Entity, WorldWorkspace
+from apps.core.models import WorldBranch
 from apps.core.serializers import (
     CommitJobSerializer,
     EntitySerializer,
@@ -14,7 +15,7 @@ from apps.core.services.branching import (
     materialize_branch_baseline,
 )
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -63,9 +64,93 @@ class CanvasViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = StagingCanvas.objects.select_related("workspace").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
+        if self.request.query_params.get("purpose") != StagingCanvas.Purpose.GRAPH:
+            qs = qs.filter(purpose=StagingCanvas.Purpose.STAGING)
         if self.request.query_params.get("workspace"):
             qs = qs.filter(workspace_id=self.request.query_params["workspace"])
         return qs
+
+    @action(detail=False, methods=["post"], url_path="graph")
+    def graph_canvas(self, request):
+        workspace_id = request.data.get("workspace")
+        branch_key = str(request.data.get("branch") or "main")
+        workspace = WorldWorkspace.objects.filter(id=workspace_id, id__in=accessible_workspace_ids(request.user)).first()
+        if not workspace:
+            return Response({"detail": "workspace not found"}, status=404)
+        branch = WorldBranch.objects.filter(workspace=workspace, status=WorldBranch.Status.ACTIVE).filter(
+            models.Q(name=branch_key) | models.Q(id=branch_key) if branch_key != "main" else models.Q(name="main")
+        ).first()
+        if not branch:
+            return Response({"detail": "branch not found"}, status=404)
+        member = membership(request.user, workspace)
+        if not member:
+            return Response({"detail": "无权访问该世界观"}, status=403)
+        canvas, created = StagingCanvas.objects.get_or_create(
+            workspace=workspace, branch=branch, purpose=StagingCanvas.Purpose.GRAPH,
+            defaults={"name": f"{workspace.name} · {branch.name} · 世界观图谱", "snapshot": {}},
+        )
+        if created:
+            CanvasRevision.objects.create(canvas=canvas, version=canvas.snapshot_version, snapshot=canvas.snapshot, sync_metadata={})
+        return Response(self.get_serializer(canvas).data, status=201 if created else 200)
+
+    def _graph_canvas(self, request, pk):
+        canvas = StagingCanvas.objects.select_related("workspace", "branch").filter(pk=pk, purpose=StagingCanvas.Purpose.GRAPH).first()
+        if not canvas or canvas.workspace_id not in accessible_workspace_ids(request.user):
+            raise ValidationError("图谱画布不存在")
+        return canvas
+
+    @action(detail=True, methods=["get"], url_path="graph-projection")
+    def graph_projection(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        from apps.core.services.branching import effective_entities, effective_relations
+        entities = effective_entities(canvas.workspace, canvas.branch)
+        relations = effective_relations(canvas.workspace, canvas.branch)
+        return Response({
+            "canvas": self.get_serializer(canvas).data,
+            "nodes": [{"id": str(e.id), "title": e.title, "type": e.type, "status": e.status, "content": e.content} for e in entities],
+            "edges": [{"id": str(r.id), "source": str(r.source_id), "target": str(r.target_id), "label": r.relation_type, "relation_type": r.relation_type, "status": "archived" if r.archived else "active"} for r in relations],
+            "layout": (canvas.snapshot or {}).get("graphLayout", {}),
+        })
+
+    @action(detail=True, methods=["get", "post"], url_path="graph-relation-proposals")
+    def graph_relation_proposals(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        if request.method == "GET":
+            rows = RelationProposal.objects.filter(canvas=canvas).select_related("source_entity", "source_proposal", "target_entity", "target_proposal")
+            return Response(RelationProposalSerializer(rows, many=True).data)
+        member = membership(request.user, canvas.workspace)
+        if not member or member.role == "reader":
+            return Response({"detail": "需要 editor 权限"}, status=403)
+        payload = dict(request.data)
+        payload["canvas"] = str(canvas.id)
+        payload["workspace"] = str(canvas.workspace_id)
+        serializer = RelationProposalSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        for endpoint in (serializer.validated_data.get("source_entity"), serializer.validated_data.get("target_entity")):
+            if endpoint and (endpoint.workspace_id != canvas.workspace_id or endpoint.status != Entity.Status.ACTIVE or endpoint.branch_id not in (None, canvas.branch_id)):
+                raise ValidationError("正式实体必须属于当前分支且处于有效状态")
+        serializer.save(workspace=canvas.workspace, canvas=canvas, status=RelationProposal.Status.PENDING)
+        return Response(serializer.data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="graph-preview")
+    def graph_preview(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        try:
+            return Response(CanvasCommitService.preview(canvas, [], request.data.get("relation_proposal_ids", [])))
+        except CanvasCommitError as exc:
+            raise ValidationError(str(exc))
+
+    @action(detail=True, methods=["post"], url_path="graph-commit")
+    def graph_commit(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        member = membership(request.user, canvas.workspace)
+        if not member or member.role == "reader":
+            return Response({"detail": "需要 editor 权限"}, status=403)
+        try:
+            job, entities, relations = CanvasCommitService.commit(canvas, [], request.data.get("relation_proposal_ids", []), request.data.get("idempotency_key"), request.data.get("preview_token"))
+        except CanvasCommitError as exc:
+            raise ValidationError(str(exc))
+        return Response({"job": CommitJobSerializer(job).data, "entities": EntitySerializer(entities, many=True).data, "relations": RelationSerializer(relations, many=True).data})
 
     def perform_create(self, serializer):
         workspace = serializer.validated_data["workspace"]
@@ -380,7 +465,11 @@ class CanvasViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="sync-ticket")
     def sync_ticket(self, request, pk=None):
         """Issue a scoped ticket for the self-hosted websocket sync service."""
-        canvas = self.get_object()
+        canvas = StagingCanvas.objects.select_related("workspace", "branch").filter(
+            pk=pk, workspace_id__in=accessible_workspace_ids(request.user)
+        ).first()
+        if not canvas:
+            return Response({"detail": "canvas not found"}, status=404)
         member = membership(request.user, canvas.workspace)
         if not member:
             return Response({"detail": "无权访问该画布"}, status=403)
@@ -540,15 +629,22 @@ class RelationProposalViewSet(viewsets.ModelViewSet):
     http_method_names: ClassVar[list[str]] = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = RelationProposal.objects.select_related("source_proposal", "target_proposal", "target_entity").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
+        qs = RelationProposal.objects.select_related("source_entity", "source_proposal", "target_proposal", "target_entity").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
         if self.request.query_params.get("canvas"):
             qs = qs.filter(canvas_id=self.request.query_params["canvas"])
         return qs
 
     def perform_create(self, serializer):
-        source = serializer.validated_data["source_proposal"]
+        source = serializer.validated_data.get("source_proposal") or serializer.validated_data.get("source_entity")
         if not membership(self.request.user, source.workspace) or membership(self.request.user, source.workspace).role == "reader": raise ValidationError("需要 editor 权限")
-        serializer.save(workspace=source.workspace, canvas=source.canvas, status="pending")
+        canvas = serializer.validated_data.get("canvas")
+        if canvas is None:
+            canvas = source.canvas if isinstance(source, EntityProposal) else StagingCanvas.objects.filter(workspace=source.workspace, purpose=StagingCanvas.Purpose.GRAPH, branch=source.branch).first()
+        if canvas is None or canvas.workspace_id != source.workspace_id:
+            raise ValidationError("必须绑定同一世界观的画布")
+        if isinstance(source, EntityProposal) and canvas.purpose != StagingCanvas.Purpose.STAGING:
+            raise ValidationError("实体提案只能来自灵感暂存画布")
+        serializer.save(workspace=source.workspace, canvas=canvas, status="pending")
 
     def partial_update(self, request, *args, **kwargs):
         with transaction.atomic():

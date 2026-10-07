@@ -1,12 +1,12 @@
 import React, { useEffect } from 'react'
 import { Tldraw, defaultShapeUtils, inlineBase64AssetStore, type Editor } from '@tldraw/tldraw'
 import { useSync } from '@tldraw/sync'
-import { CardUtil } from './adapter'
+import { CardUtil, EntityUtil } from './adapter'
 
 // Keep this array referentially stable. useSync derives its schema from shapeUtils;
 // recreating the array on every React render makes the schema look changed, which
 // tears down and recreates the room on every status update (an infinite render loop).
-const officialShapeUtils = [...defaultShapeUtils, CardUtil]
+const officialShapeUtils = [...defaultShapeUtils, CardUtil, EntityUtil]
 
 export interface OfficialCollaborativeCanvasProps {
   uri: string | (() => Promise<string>)

@@ -33,6 +33,16 @@ const customShapeSchemas = {
       proposalId: T.string,
     },
   },
+  'oc-entity': {
+    props: {
+      w: T.number,
+      h: T.number,
+      entityId: T.string,
+      title: T.string,
+      entityType: T.string,
+      stale: T.boolean,
+    },
+  },
 }
 
 export const projectocSchema = createTLSchema({

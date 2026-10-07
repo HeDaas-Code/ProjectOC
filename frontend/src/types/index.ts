@@ -11,7 +11,7 @@ export interface Workspace {
 export interface Membership { id: number; workspace: string; user: number | string; username: string; email: string; role: 'owner' | 'editor' | 'reader'; created_at: string }
 export interface Invite { id: string; workspace: string; workspace_name?: string; email: string; role: 'editor' | 'reader'; expires_at: string; accepted_at: string | null; created_at: string; invite_url?: string }
 export interface Branch { id: string; workspace: string; name: string; status: "active" | "merged" | "archived"; base_commit?: string; git_ref?: string }
-export interface Canvas { id: string; workspace: string; branch: string; name: string; snapshot: unknown; snapshot_version: number; status: string }
+export interface Canvas { id: string; purpose?: 'staging' | 'graph'; workspace: string; branch: string; name: string; snapshot: unknown; snapshot_version: number; status: string }
 export interface Proposal { id: string; canvas: string; entity_type: EntityType; title: string; content: string; metadata: Record<string, unknown>; status: string; created_entity: string | null; updated_at: string; conflicts: { message: string; entityId?: string }[]; suggested_relations: RelationProposal[] }
 export interface RelationProposal { id: string; source_proposal: string; target_proposal: string | null; target_entity: string | null; target_title: string; relation_type: string; reason: string; status: string; time_system: string | null; valid_from: number | null; valid_to: number | null }
 export interface Entity { id: string; type: EntityType; title: string; content: string; status: "active" | "archived"; git_path: string; commit_hash: string; sync_status: string }

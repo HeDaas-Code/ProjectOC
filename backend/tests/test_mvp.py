@@ -24,6 +24,28 @@ class MvpApiTests(TestCase):
         self.assertEqual(canvas_response.status_code, 201)
         self.canvas_id = canvas_response.data["id"]
 
+    def test_graph_formal_relation_review_and_isolation(self):
+        canvas = StagingCanvas.objects.get(pk=self.canvas_id)
+        graph = StagingCanvas.objects.create(workspace=canvas.workspace, branch=canvas.branch, purpose="graph")
+        source = Entity.objects.create(workspace=canvas.workspace, branch=canvas.branch, type="character", title="甲")
+        target = Entity.objects.create(workspace=canvas.workspace, branch=canvas.branch, type="character", title="乙")
+        url = f"/api/v1/canvases/{graph.id}"
+        created = self.client.post(url + "/graph-relation-proposals/", {
+            "source_entity": str(source.id), "target_entity": str(target.id), "relation_type": "KNOWS",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        selection = {"relation_proposal_ids": [created.data["id"]]}
+        preview = self.client.post(url + "/graph-preview/", selection, format="json")
+        self.assertEqual(preview.status_code, 200, preview.data)
+        confirmed = self.client.post(url + "/graph-commit/", {
+            **selection, "preview_token": preview.data["preview_token"], "idempotency_key": "graph-review-test",
+        }, format="json")
+        self.assertEqual(confirmed.status_code, 200, confirmed.data)
+        self.assertEqual(Relation.objects.filter(branch=canvas.branch, source=source, target=target).count(), 1)
+        self.assertEqual(Relation.objects.filter(branch=None).count(), 0)
+        invalid = self.client.post(url + "/graph-preview/", {"relation_proposal_ids": []}, format="json")
+        self.assertEqual(invalid.status_code, 400)
+
     def tearDown(self):
         self.settings_override.disable()
         self.tempdir.cleanup()

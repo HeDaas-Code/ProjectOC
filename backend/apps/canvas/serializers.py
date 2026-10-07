@@ -20,26 +20,31 @@ class StagingCanvasSerializer(serializers.ModelSerializer):
     class Meta:
         model = StagingCanvas
         fields = [
-            "id", "workspace", "branch", "workspace_name", "name", "snapshot", "sync_metadata", "snapshot_version",
+            "id", "purpose", "workspace", "branch", "workspace_name", "name", "snapshot", "sync_metadata", "snapshot_version",
             "snapshot_operation_cursor", "operation_compacted_through",
             "status", "last_saved_at", "proposal_count", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "sync_metadata", "snapshot_version", "snapshot_operation_cursor", "operation_compacted_through", "last_saved_at", "proposal_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "purpose", "sync_metadata", "snapshot_version", "snapshot_operation_cursor", "operation_compacted_through", "last_saved_at", "proposal_count", "created_at", "updated_at"]
 
 
 class RelationProposalSerializer(serializers.ModelSerializer):
+    source_entity_title = serializers.CharField(source="source_entity.title", read_only=True)
+    source_title = serializers.SerializerMethodField()
     target_title = serializers.SerializerMethodField()
     relation_type_label = serializers.CharField(source="get_relation_type_display", read_only=True)
 
     class Meta:
         model = RelationProposal
         fields = [
-            "id", "source_proposal", "target_proposal", "target_entity", "target_title",
+            "id", "source_entity", "source_entity_title", "source_proposal", "source_title", "target_proposal", "target_entity", "target_title",
             "relation_type", "relation_type_label", "properties", "confidence", "reason",
             "time_system", "valid_from", "valid_to",
             "status", "created_relation", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "target_title", "created_relation", "created_at", "updated_at"]
+        read_only_fields = ["id", "source_entity_title", "source_title", "target_title", "created_relation", "created_at", "updated_at"]
+
+    def get_source_title(self, obj):
+        return obj.source_entity.title if obj.source_entity_id else (obj.source_proposal.title if obj.source_proposal_id else None)
 
     def get_target_title(self, obj):
         if obj.target_proposal_id:
@@ -57,10 +62,11 @@ class RelationProposalSerializer(serializers.ModelSerializer):
         fields keep their existing value.
         """
         instance = self.instance
-        source = attrs.get("source_proposal", getattr(instance, "source_proposal", None))
-
-        if source is None:
-            raise serializers.ValidationError({"source_proposal": "必须指定源提案"})
+        source_proposal = attrs.get("source_proposal", getattr(instance, "source_proposal", None))
+        source_entity = attrs.get("source_entity", getattr(instance, "source_entity", None))
+        if bool(source_proposal) == bool(source_entity):
+            raise serializers.ValidationError({"source_proposal": "必须且只能指定一个源提案或正式实体", "source_entity": "必须且只能指定一个源提案或正式实体"})
+        source = source_proposal or source_entity
 
         target_proposal_supplied = "target_proposal" in attrs
         target_entity_supplied = "target_entity" in attrs
@@ -85,8 +91,10 @@ class RelationProposalSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("关系两端必须属于同一世界观")
         source_canvas_id = getattr(source, "canvas_id", None)
         target_canvas_id = getattr(target, "canvas_id", None)
-        if target_proposal and target_canvas_id != source_canvas_id:
+        if target_proposal and source_proposal and target_canvas_id != source_canvas_id:
             raise serializers.ValidationError("关系两端的提案必须属于同一画布")
+        if source_entity and source_entity.workspace_id != target.workspace_id:
+            raise serializers.ValidationError("关系两端必须属于同一世界观")
 
         time_system = attrs.get("time_system", getattr(instance, "time_system", None))
         if time_system and time_system.workspace_id != source.workspace_id:
@@ -127,6 +135,8 @@ class EntityProposalSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("提案必须绑定世界观和画布")
         if canvas.workspace_id != workspace.id:
             raise serializers.ValidationError("画布与世界观不匹配")
+        if canvas.purpose != StagingCanvas.Purpose.STAGING:
+            raise serializers.ValidationError("世界观图谱不能绑定灵感对话")
         return attrs
 
 
