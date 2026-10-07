@@ -25,6 +25,7 @@
 - **PostgreSQL**：部署中的领域事实源，保存账户、工作区、实体关系、提案、时间数据、画布快照、同步事件和任务。
 - **Git**：每个世界观的内容历史与导出，位于 `world_repos/<slug>-<id>/`，独立于应用源码仓库。
 - **Neo4j**：可从正式数据重建的图谱投影。高级查询不可用时可回退 PostgreSQL，并标记结果来源。
+- **世界观图谱画板**：每个 `workspace/branch` 一张官方 `tldraw-sync-v2` 画布。正式实体以稳定 `entity:<uuid>` 节点投影，正式关系以绑定 `relation:<uuid>` 箭头投影；画板创建的关系先进入 `RelationProposal`，审核提交后才写入正式关系。布局属于画布快照，语义数据仍由 PostgreSQL 正式实体/关系提供。
 - **Redis**：官方同步房间的跨实例租约协调，不保存领域事实。
 - **同步 SQLite**：官方房间的协议 journal/cache。恢复时与 PostgreSQL 的 clock/hash 对账，必要时回放事件或重建。
 - **本地开发 SQLite**：未设置 PostgreSQL `DATABASE_URL` 时的 Django 开发回退，不等同于同步服务的 SQLite。
