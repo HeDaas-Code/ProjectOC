@@ -6,7 +6,7 @@ import { entityTypes, type Entity } from '../types'
 import GraphCanvasSurface from './GraphCanvasSurface.vue'
 import type { Canvas } from '../types'
 
-type GraphNode = { id: string; title: string; type: string }
+type GraphNode = { id: string; title: string; type: string; status?: string }
 type GraphEdge = { id: string; source: string; target: string; label: string }
 type PathResult = { nodes: GraphNode[]; edges: { id: string; type: string }[] }
 type ImpactItem = { id: string; title: string; degree: number }
