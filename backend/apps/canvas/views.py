@@ -406,7 +406,11 @@ class CanvasViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="sync-ticket")
     def sync_ticket(self, request, pk=None):
         """Issue a scoped ticket for the self-hosted websocket sync service."""
-        canvas = self.get_object()
+        canvas = StagingCanvas.objects.select_related("workspace", "branch").filter(
+            pk=pk, workspace_id__in=accessible_workspace_ids(request.user)
+        ).first()
+        if not canvas:
+            return Response({"detail": "canvas not found"}, status=404)
         member = membership(request.user, canvas.workspace)
         if not member:
             return Response({"detail": "无权访问该画布"}, status=403)
