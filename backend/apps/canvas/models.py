@@ -179,7 +179,8 @@ class RelationProposal(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey(WorldWorkspace, on_delete=models.CASCADE, related_name="relation_proposals")
     canvas = models.ForeignKey(StagingCanvas, on_delete=models.CASCADE, related_name="relation_proposals")
-    source_proposal = models.ForeignKey(EntityProposal, on_delete=models.CASCADE, related_name="suggested_relations")
+    source_entity = models.ForeignKey(Entity, on_delete=models.SET_NULL, null=True, blank=True, related_name="outgoing_relation_proposals")
+    source_proposal = models.ForeignKey(EntityProposal, on_delete=models.CASCADE, null=True, blank=True, related_name="suggested_relations")
     target_proposal = models.ForeignKey(EntityProposal, on_delete=models.SET_NULL, null=True, blank=True, related_name="incoming_relation_proposals")
     target_entity = models.ForeignKey(Entity, on_delete=models.SET_NULL, null=True, blank=True, related_name="incoming_relation_proposals")
     relation_type = models.CharField(max_length=50, choices=Relation.RelationType.choices)
@@ -196,6 +197,12 @@ class RelationProposal(models.Model):
 
     class Meta:
         ordering = ["-confidence", "created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(source_entity__isnull=False) ^ models.Q(source_proposal__isnull=False)),
+                name="relation_proposal_exactly_one_source",
+            ),
+        ]
 
 
 class CanvasRevision(models.Model):

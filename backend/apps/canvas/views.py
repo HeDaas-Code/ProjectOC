@@ -3,7 +3,7 @@ import json
 from typing import ClassVar
 
 from apps.accounts.permissions import accessible_workspace_ids, membership
-from apps.core.models import WorldWorkspace
+from apps.core.models import Entity, WorldWorkspace
 from apps.core.models import WorldBranch
 from apps.core.serializers import (
     CommitJobSerializer,
@@ -570,15 +570,22 @@ class RelationProposalViewSet(viewsets.ModelViewSet):
     http_method_names: ClassVar[list[str]] = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = RelationProposal.objects.select_related("source_proposal", "target_proposal", "target_entity").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
+        qs = RelationProposal.objects.select_related("source_entity", "source_proposal", "target_proposal", "target_entity").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
         if self.request.query_params.get("canvas"):
             qs = qs.filter(canvas_id=self.request.query_params["canvas"])
         return qs
 
     def perform_create(self, serializer):
-        source = serializer.validated_data["source_proposal"]
+        source = serializer.validated_data.get("source_proposal") or serializer.validated_data.get("source_entity")
         if not membership(self.request.user, source.workspace) or membership(self.request.user, source.workspace).role == "reader": raise ValidationError("需要 editor 权限")
-        serializer.save(workspace=source.workspace, canvas=source.canvas, status="pending")
+        canvas = serializer.validated_data.get("canvas")
+        if canvas is None:
+            canvas = source.canvas if isinstance(source, EntityProposal) else StagingCanvas.objects.filter(workspace=source.workspace, purpose=StagingCanvas.Purpose.GRAPH, branch=source.branch).first()
+        if canvas is None or canvas.workspace_id != source.workspace_id:
+            raise ValidationError("必须绑定同一世界观的画布")
+        if isinstance(source, EntityProposal) and canvas.purpose != StagingCanvas.Purpose.STAGING:
+            raise ValidationError("实体提案只能来自灵感暂存画布")
+        serializer.save(workspace=source.workspace, canvas=canvas, status="pending")
 
     def partial_update(self, request, *args, **kwargs):
         with transaction.atomic():
