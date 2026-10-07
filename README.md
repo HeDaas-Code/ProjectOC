@@ -21,7 +21,9 @@
 
 > 当前版本适合本地使用和私有网络协作。画布统一使用官方 `tldraw-sync-v2`；历史 `records-v1` 只保留一次性迁移读取能力，已不再提供实时连接或协议降级。
 
-![ProjectOC 工作台](docs/assets/workbench.png)
+<p align="center"><img src="docs/assets/staging-canvas.jpg" alt="ProjectOC 灵感画布与 AI 对话" width="100%"></p>
+
+<p align="center"><em>灵感画布：左侧管理世界与分支，中间整理设定，右侧与构建伙伴对话。</em></p>
 
 ## ProjectOC 是什么
 
@@ -46,6 +48,14 @@ AI 的输出永远先进入提案区。只有经过明确审核，内容才会�
 
 实体和关系都有明确状态、来源和提交前预览。你可以逐条接受、拒绝或修改提案，也可以在写入正式数据前查看差异。
 
+### 一眼看懂工作台
+
+下面是一次登录后的真实工作台截图，展示了项目当前版本的主要工作流：
+
+| 灵感画布 | 图谱画板 | 维护与恢复 |
+| --- | --- | --- |
+| ![灵感画布](docs/assets/staging-canvas.jpg) | ![世界观图谱](docs/assets/world-graph.jpg) | ![维护状态](docs/assets/maintenance.jpg) |
+
 ### TLDraw 世界观图谱
 
 每个 `workspace / branch` 拥有独立图谱画板：
@@ -56,6 +66,14 @@ AI 的输出永远先进入提案区。只有经过明确审核，内容才会�
 - 支持自动布局、类型筛选、孤立节点和失效节点筛选；
 - 支持节点详情、关系详情、路径分析和影响范围分析；
 - reader 可以查看，editor 可以提出修改，owner 可以管理画布与分支。
+
+![图谱分析视图](docs/assets/graph-analysis.jpg)
+
+图谱之外，时间线和提案审核也有独立工作区：
+
+| 提案审核 | 时间线版本 |
+| --- | --- |
+| ![提案审核](docs/assets/proposal-review.jpg) | ![时间线](docs/assets/timeline.jpg) |
 
 ### 分支与历史
 
