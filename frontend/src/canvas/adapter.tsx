@@ -76,16 +76,24 @@ export class TldrawAdapter implements CanvasAdapter {
 export function syncGraphProjection(editor: Editor, nodes: { id: string; title: string; type: string; status?: string }[], edges: { id: string; source: string; target: string; label: string }[]) {
   const existing = new Set(editor.getCurrentPageShapes().map(shape => shape.id))
   nodes.forEach((node, index) => {
-    const id = createShapeId(`entity-${node.id}`)
-    if (existing.has(id)) return
-    editor.createShape<EntityShape>({ id, type: 'oc-entity', x: 120 + (index % 4) * 280, y: 120 + Math.floor(index / 4) * 150, props: { entityId: node.id, title: node.title, entityType: node.type, stale: node.status === 'archived' } })
+    const id = createShapeId(`entity:${node.id}`)
+    const current = editor.getShape(id) as EntityShape | undefined
+    if (current) {
+      editor.updateShape<EntityShape>({ id, type: 'oc-entity', props: { ...current.props, title: node.title, entityType: node.type, stale: node.status === 'archived' } })
+      return
+    }
+    editor.createShape<EntityShape>({ id, type: 'oc-entity', x: 120 + (index % 4) * 280, y: 120 + Math.floor(index / 4) * 150, props: { w: 220, h: 90, entityId: node.id, title: node.title, entityType: node.type, stale: node.status === 'archived' } })
   })
   edges.forEach(edge => {
-    const id = createShapeId(`relation-${edge.id}`)
+    const id = createShapeId(`relation:${edge.id}`)
     if (existing.has(id)) return
-    const source = editor.getShape(createShapeId(`entity-${edge.source}`))
-    const target = editor.getShape(createShapeId(`entity-${edge.target}`))
+    const source = editor.getShape(createShapeId(`entity:${edge.source}`))
+    const target = editor.getShape(createShapeId(`entity:${edge.target}`))
     if (!source || !target) return
     editor.createShape({ id, type: 'arrow', x: source.x, y: source.y, props: { kind: 'elbow', color: 'grey', fill: 'none', dash: 'draw', size: 'm', arrowheadStart: 'none', arrowheadEnd: 'triangle', font: 'draw', labelColor: 'grey', start: { x: 0, y: 0 }, end: { x: target.x - source.x, y: target.y - source.y }, bend: 0, richText: toRichText(edge.label), labelPosition: .5, scale: 1, elbowMidPoint: .5 } })
+    try {
+      editor.createBinding({ type: 'arrow', fromId: id, toId: source.id, props: { terminal: 'start' } })
+      editor.createBinding({ type: 'arrow', fromId: id, toId: target.id, props: { terminal: 'end' } })
+    } catch { /* older TLDraw schemas can still render the coordinate fallback */ }
   })
 }
