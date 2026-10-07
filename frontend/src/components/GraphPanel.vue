@@ -15,6 +15,7 @@ const props = defineProps<{ workspace: string; branch?: string; revision: string
 const emit = defineEmits<{ error: [message: string] }>()
 const host = ref<HTMLElement>(), filter = ref(''), entity = ref<Entity>(), links = ref<any>()
 const graphNodes = ref<GraphNode[]>([]), graphEdges = ref<GraphEdge[]>([]), pathTarget = ref(''), path = ref<PathResult>(), pathSource = ref(''), impact = ref<ImpactItem[]>([]), analysisLoading = ref(false)
+const showComposer = ref(false), relationSource = ref(''), relationTarget = ref(''), relationType = ref('LINKED_TO'), relationReason = ref(''), proposalMessage = ref('')
 const graphCanvas = ref<Canvas>(), view = ref<'canvas' | 'analysis'>('canvas')
 let graph: Core | undefined
 const pathTargetOptions = computed(() => graphNodes.value.filter(node => node.id !== entity.value?.id))
@@ -54,6 +55,14 @@ async function load() {
   } catch (e) { emit('error', String(e)) }
 }
 
+async function createRelationProposal() {
+  if (!graphCanvas.value || !relationSource.value || !relationTarget.value || relationSource.value === relationTarget.value) return
+  try {
+    await api(`canvases/${graphCanvas.value.id}/graph-relation-proposals/`, 'POST', { source_entity: relationSource.value, target_entity: relationTarget.value, relation_type: relationType.value, reason: relationReason.value })
+    proposalMessage.value = '关系提案已保存，等待审核'; relationReason.value = ''; showComposer.value = false
+  } catch (e) { emit('error', String(e)) }
+}
+
 async function findPath() {
   if (!entity.value || !pathTarget.value) return
   analysisLoading.value = true
@@ -88,7 +97,9 @@ onBeforeUnmount(() => graph?.destroy())
 
 <template>
   <section class="graph-panel">
-    <header><h2>世界观图谱</h2><button :class="{ active: view === 'canvas' }" @click="view = 'canvas'">画板</button><button :class="{ active: view === 'analysis' }" @click="view = 'analysis'">分析</button><select v-model="filter"><option value="">全部实体类型</option><option v-for="(label, value) in entityTypes" :value="value">{{ label }}</option></select><button @click="load">刷新</button><span class="muted">{{ view === 'canvas' ? '正式设定快照 · 可协作编排' : '仅显示已确认关系 · 拖动节点探索' }}</span></header>
+    <header><h2>世界观图谱</h2><button :class="{ active: view === 'canvas' }" @click="view = 'canvas'">画板</button><button :class="{ active: view === 'analysis' }" @click="view = 'analysis'">分析</button><select v-model="filter"><option value="">全部实体类型</option><option v-for="(label, value) in entityTypes" :value="value">{{ label }}</option></select><button v-if="view === 'canvas'" @click="showComposer = true">创建关系</button><button @click="load">刷新正式投影</button><span class="muted">{{ view === 'canvas' ? '正式设定快照 · 可协作编排' : '仅显示已确认关系 · 拖动节点探索' }}</span></header>
+    <p v-if="proposalMessage" class="success-banner">{{ proposalMessage }}</p>
+    <div v-if="showComposer" class="graph-proposal-dialog" role="dialog" aria-modal="true"><h3>创建关系提案</h3><label>源实体<select v-model="relationSource"><option value="">选择实体</option><option v-for="node in graphNodes" :key="node.id" :value="node.id">{{ node.title }}</option></select></label><label>目标实体<select v-model="relationTarget"><option value="">选择实体</option><option v-for="node in graphNodes" :key="node.id" :value="node.id">{{ node.title }}</option></select></label><label>关系类型<select v-model="relationType"><option v-for="(_, value) in { LINKED_TO: 1, DERIVES_FROM: 1, BELONGS_TO: 1, INFLUENCES: 1, CONFLICTS_WITH: 1 }" :value="value">{{ value }}</option></select></label><label>说明<textarea v-model="relationReason" /></label><footer><button @click="showComposer = false">取消</button><button class="primary" :disabled="!relationSource || !relationTarget" @click="createRelationProposal">提交审核</button></footer></div>
     <div class="graph-layout">
       <GraphCanvasSurface v-if="view === 'canvas' && graphCanvas" :canvas="graphCanvas" :nodes="graphNodes" :edges="graphEdges" @error="emit('error', $event)" /><div v-else ref="host" class="graph-host"/>
       <aside v-if="entity" class="entity-detail">
