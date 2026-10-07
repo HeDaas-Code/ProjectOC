@@ -3,15 +3,19 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import { api } from '../services/api'
 import { entityTypes, type Entity } from '../types'
+import GraphCanvasSurface from './GraphCanvasSurface.vue'
+import type { Canvas } from '../types'
 
 type GraphNode = { id: string; title: string; type: string }
+type GraphEdge = { id: string; source: string; target: string; label: string }
 type PathResult = { nodes: GraphNode[]; edges: { id: string; type: string }[] }
 type ImpactItem = { id: string; title: string; degree: number }
 
 const props = defineProps<{ workspace: string; branch?: string; revision: string; selectedId?: string }>()
 const emit = defineEmits<{ error: [message: string] }>()
 const host = ref<HTMLElement>(), filter = ref(''), entity = ref<Entity>(), links = ref<any>()
-const graphNodes = ref<GraphNode[]>([]), pathTarget = ref(''), path = ref<PathResult>(), pathSource = ref(''), impact = ref<ImpactItem[]>([]), analysisLoading = ref(false)
+const graphNodes = ref<GraphNode[]>([]), graphEdges = ref<GraphEdge[]>([]), pathTarget = ref(''), path = ref<PathResult>(), pathSource = ref(''), impact = ref<ImpactItem[]>([]), analysisLoading = ref(false)
+const graphCanvas = ref<Canvas>(), view = ref<'canvas' | 'analysis'>('canvas')
 let graph: Core | undefined
 const pathTargetOptions = computed(() => graphNodes.value.filter(node => node.id !== entity.value?.id))
 const branchQuery = computed(() => props.branch && props.branch !== 'main' ? `&branch=${encodeURIComponent(props.branch)}` : '')
@@ -34,8 +38,11 @@ async function load() {
   try {
     const data = await api<{ nodes: { data: GraphNode }[]; edges: any[] }>(`graph/?workspace=${props.workspace}${filter.value ? `&type=${filter.value}` : ''}${branchQuery.value}`)
     graphNodes.value = data.nodes.map(node => node.data)
+    graphEdges.value = data.edges.map(edge => ({ id: edge.data.id, source: edge.data.source, target: edge.data.target, label: edge.data.label }))
+    if (!graphCanvas.value) graphCanvas.value = await api<Canvas>('canvases/graph/', 'POST', { workspace: props.workspace, branch: props.branch || 'main' })
     if (pathTarget.value && !graphNodes.value.some(node => node.id === pathTarget.value)) pathTarget.value = ''
     graph?.destroy()
+    if (view.value !== 'analysis' || !host.value) return
     graph = cytoscape({ container: host.value, elements: [...data.nodes, ...data.edges], layout: { name: 'cose', animate: false, padding: 60 }, style: [
       { selector: 'node', style: { label: 'data(title)', 'background-color': '#658675', color: '#344a42', 'font-size': 12, 'text-valign': 'bottom', 'text-margin-y': 9, width: 35, height: 35 } },
       { selector: 'edge', style: { label: 'data(label)', width: 1.5, 'line-color': '#b7c5bb', 'target-arrow-color': '#b7c5bb', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'font-size': 10, color: '#7a827a' } },
@@ -73,16 +80,17 @@ async function analyzeImpact() {
 }
 
 onMounted(() => { void load(); if (props.selectedId) void select(props.selectedId) })
-watch(() => [props.workspace, props.branch, props.revision, filter.value], load)
+watch(() => [props.workspace, props.branch, props.revision, filter.value], () => { graphCanvas.value = undefined; void load() })
+watch(view, value => { if (value === 'analysis') void load() })
 watch(() => props.selectedId, id => { if (id) void select(id) })
 onBeforeUnmount(() => graph?.destroy())
 </script>
 
 <template>
   <section class="graph-panel">
-    <header><h2>世界观图谱</h2><select v-model="filter"><option value="">全部实体类型</option><option v-for="(label, value) in entityTypes" :value="value">{{ label }}</option></select><button @click="load">刷新</button><span class="muted">仅显示已确认关系 · 拖动节点探索</span></header>
+    <header><h2>世界观图谱</h2><button :class="{ active: view === 'canvas' }" @click="view = 'canvas'">画板</button><button :class="{ active: view === 'analysis' }" @click="view = 'analysis'">分析</button><select v-model="filter"><option value="">全部实体类型</option><option v-for="(label, value) in entityTypes" :value="value">{{ label }}</option></select><button @click="load">刷新</button><span class="muted">{{ view === 'canvas' ? '正式设定快照 · 可协作编排' : '仅显示已确认关系 · 拖动节点探索' }}</span></header>
     <div class="graph-layout">
-      <div ref="host" class="graph-host"/>
+      <GraphCanvasSurface v-if="view === 'canvas' && graphCanvas" :canvas="graphCanvas" :nodes="graphNodes" :edges="graphEdges" @error="emit('error', $event)" /><div v-else ref="host" class="graph-host"/>
       <aside v-if="entity" class="entity-detail">
         <span class="eyebrow">{{ entityTypes[entity.type] }}</span><h2>{{ entity.title }}</h2><p class="preserve">{{ entity.content }}</p>
         <h3>出链</h3><button v-for="link in links?.outgoing" @click="select(link.otherEntity.id)">{{ link.relationLabel }} → {{ link.otherEntity.title }}</button><p v-if="!links?.outgoing.length" class="muted">没有出链</p>

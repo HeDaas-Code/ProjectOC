@@ -5,12 +5,17 @@ from apps.core.models import Entity, Relation, TimeSystem, WorldBranch, WorldWor
 
 
 class StagingCanvas(models.Model):
+    class Purpose(models.TextChoices):
+        STAGING = "staging", "灵感暂存"
+        GRAPH = "graph", "世界观图谱"
+
     class Status(models.TextChoices):
         ACTIVE = "active", "活跃"
         ARCHIVED = "archived", "归档"
         COMMITTED = "committed", "已提交"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    purpose = models.CharField(max_length=16, choices=Purpose.choices, default=Purpose.STAGING)
     workspace = models.ForeignKey(WorldWorkspace, on_delete=models.CASCADE, related_name="canvases")
     branch = models.ForeignKey(WorldBranch, on_delete=models.PROTECT, null=True, blank=True, related_name="canvases")
     name = models.CharField(max_length=200, default="未命名暂存区")
@@ -30,6 +35,13 @@ class StagingCanvas(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "branch"],
+                condition=models.Q(purpose="graph"),
+                name="unique_graph_canvas_workspace_branch",
+            ),
+    ]
 
     def __str__(self) -> str:
         return self.name

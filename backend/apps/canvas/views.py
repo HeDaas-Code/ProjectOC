@@ -4,6 +4,7 @@ from typing import ClassVar
 
 from apps.accounts.permissions import accessible_workspace_ids, membership
 from apps.core.models import WorldWorkspace
+from apps.core.models import WorldBranch
 from apps.core.serializers import (
     CommitJobSerializer,
     EntitySerializer,
@@ -14,7 +15,7 @@ from apps.core.services.branching import (
     materialize_branch_baseline,
 )
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -63,9 +64,34 @@ class CanvasViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = StagingCanvas.objects.select_related("workspace").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
+        if self.request.query_params.get("purpose") != StagingCanvas.Purpose.GRAPH:
+            qs = qs.filter(purpose=StagingCanvas.Purpose.STAGING)
         if self.request.query_params.get("workspace"):
             qs = qs.filter(workspace_id=self.request.query_params["workspace"])
         return qs
+
+    @action(detail=False, methods=["post"], url_path="graph")
+    def graph_canvas(self, request):
+        workspace_id = request.data.get("workspace")
+        branch_key = str(request.data.get("branch") or "main")
+        workspace = WorldWorkspace.objects.filter(id=workspace_id, id__in=accessible_workspace_ids(request.user)).first()
+        if not workspace:
+            return Response({"detail": "workspace not found"}, status=404)
+        branch = WorldBranch.objects.filter(workspace=workspace, status=WorldBranch.Status.ACTIVE).filter(
+            models.Q(name=branch_key) | models.Q(id=branch_key) if branch_key != "main" else models.Q(name="main")
+        ).first()
+        if not branch:
+            return Response({"detail": "branch not found"}, status=404)
+        member = membership(request.user, workspace)
+        if not member:
+            return Response({"detail": "无权访问该世界观"}, status=403)
+        canvas, created = StagingCanvas.objects.get_or_create(
+            workspace=workspace, branch=branch, purpose=StagingCanvas.Purpose.GRAPH,
+            defaults={"name": f"{workspace.name} · {branch.name} · 世界观图谱", "snapshot": {}},
+        )
+        if created:
+            CanvasRevision.objects.create(canvas=canvas, version=canvas.snapshot_version, snapshot=canvas.snapshot, sync_metadata={})
+        return Response(self.get_serializer(canvas).data, status=201 if created else 200)
 
     def perform_create(self, serializer):
         workspace = serializer.validated_data["workspace"]

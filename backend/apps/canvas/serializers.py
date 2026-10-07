@@ -20,11 +20,11 @@ class StagingCanvasSerializer(serializers.ModelSerializer):
     class Meta:
         model = StagingCanvas
         fields = [
-            "id", "workspace", "branch", "workspace_name", "name", "snapshot", "sync_metadata", "snapshot_version",
+            "id", "purpose", "workspace", "branch", "workspace_name", "name", "snapshot", "sync_metadata", "snapshot_version",
             "snapshot_operation_cursor", "operation_compacted_through",
             "status", "last_saved_at", "proposal_count", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "sync_metadata", "snapshot_version", "snapshot_operation_cursor", "operation_compacted_through", "last_saved_at", "proposal_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "purpose", "sync_metadata", "snapshot_version", "snapshot_operation_cursor", "operation_compacted_through", "last_saved_at", "proposal_count", "created_at", "updated_at"]
 
 
 class RelationProposalSerializer(serializers.ModelSerializer):
@@ -127,6 +127,8 @@ class EntityProposalSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("提案必须绑定世界观和画布")
         if canvas.workspace_id != workspace.id:
             raise serializers.ValidationError("画布与世界观不匹配")
+        if canvas.purpose != StagingCanvas.Purpose.STAGING:
+            raise serializers.ValidationError("世界观图谱不能绑定灵感对话")
         return attrs
 
 

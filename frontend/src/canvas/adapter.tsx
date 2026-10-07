@@ -1,11 +1,21 @@
 import React from 'react'
-import { BaseBoxShapeUtil, HTMLContainer, T, createShapeId, getSnapshot, loadSnapshot, type Editor, type TLBaseShape, type TLShapeId } from '@tldraw/tldraw'
+import { BaseBoxShapeUtil, HTMLContainer, T, createShapeId, getSnapshot, loadSnapshot, toRichText, type Editor, type TLBaseShape, type TLShapeId } from '@tldraw/tldraw'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import katex from 'katex'
 import type { Proposal } from '../types'
 declare module '@tldraw/tlschema' { interface TLGlobalShapePropsMap { 'oc-card': { w: number; h: number; kind: string; text: string; proposalId: string } } }
 export type Card = TLBaseShape<'oc-card', { w: number; h: number; kind: string; text: string; proposalId: string }>
+declare module '@tldraw/tlschema' { interface TLGlobalShapePropsMap { 'oc-entity': { w: number; h: number; entityId: string; title: string; entityType: string; stale: boolean } } }
+export type EntityShape = TLBaseShape<'oc-entity', { w: number; h: number; entityId: string; title: string; entityType: string; stale: boolean }>
+const entityColors: Record<string, string> = { canonical_setting: '#658675', character: '#9b83bb', timeline: '#699eb0', event: '#c68d76', item: '#c0ad71', location: '#7ea187', faction: '#9b8c82', floating_tip: '#d0a15c' }
+export class EntityUtil extends BaseBoxShapeUtil<EntityShape> {
+  static override type = 'oc-entity' as const
+  static override props = { w: T.number, h: T.number, entityId: T.string, title: T.string, entityType: T.string, stale: T.boolean }
+  getDefaultProps() { return { w: 220, h: 90, entityId: '', title: '未命名实体', entityType: 'floating_tip', stale: false } }
+  component(shape: EntityShape) { return <HTMLContainer className="oc-entity-node" style={{ borderColor: entityColors[shape.props.entityType] || '#658675', opacity: shape.props.stale ? .55 : 1 }}><span className="oc-entity-type">{shape.props.entityType}</span><strong>{shape.props.title}</strong></HTMLContainer> }
+  getIndicatorPath(shape: EntityShape) { const path = new Path2D(); path.roundRect(0, 0, shape.props.w, shape.props.h, 12); return path }
+}
 export class CardUtil extends BaseBoxShapeUtil<Card> {
   static override type = 'oc-card' as const
   static override props = { w: T.number, h: T.number, kind: T.string, text: T.string, proposalId: T.string }
@@ -62,4 +72,20 @@ export class TldrawAdapter implements CanvasAdapter {
     const center = this.editor.getViewportPageBounds().center
     this.editor.createShape<Card>({ type: 'oc-card', x: center.x - 145, y: center.y - 105, props: { w: 290, h: 210, kind, text, proposalId: '' } })
   }
+}
+export function syncGraphProjection(editor: Editor, nodes: { id: string; title: string; type: string; status?: string }[], edges: { id: string; source: string; target: string; label: string }[]) {
+  const existing = new Set(editor.getCurrentPageShapes().map(shape => shape.id))
+  nodes.forEach((node, index) => {
+    const id = createShapeId(`entity-${node.id}`)
+    if (existing.has(id)) return
+    editor.createShape<EntityShape>({ id, type: 'oc-entity', x: 120 + (index % 4) * 280, y: 120 + Math.floor(index / 4) * 150, props: { entityId: node.id, title: node.title, entityType: node.type, stale: node.status === 'archived' } })
+  })
+  edges.forEach(edge => {
+    const id = createShapeId(`relation-${edge.id}`)
+    if (existing.has(id)) return
+    const source = editor.getShape(createShapeId(`entity-${edge.source}`))
+    const target = editor.getShape(createShapeId(`entity-${edge.target}`))
+    if (!source || !target) return
+    editor.createShape({ id, type: 'arrow', x: source.x, y: source.y, props: { kind: 'elbow', color: 'grey', fill: 'none', dash: 'draw', size: 'm', arrowheadStart: 'none', arrowheadEnd: 'triangle', font: 'draw', labelColor: 'grey', start: { x: 0, y: 0 }, end: { x: target.x - source.x, y: target.y - source.y }, bend: 0, richText: toRichText(edge.label), labelPosition: .5, scale: 1, elbowMidPoint: .5 } })
+  })
 }
