@@ -93,6 +93,62 @@ class CanvasViewSet(viewsets.ModelViewSet):
             CanvasRevision.objects.create(canvas=canvas, version=canvas.snapshot_version, snapshot=canvas.snapshot, sync_metadata={})
         return Response(self.get_serializer(canvas).data, status=201 if created else 200)
 
+    def _graph_canvas(self, request, pk):
+        canvas = StagingCanvas.objects.select_related("workspace", "branch").filter(pk=pk, purpose=StagingCanvas.Purpose.GRAPH).first()
+        if not canvas or canvas.workspace_id not in accessible_workspace_ids(request.user):
+            raise ValidationError("图谱画布不存在")
+        return canvas
+
+    @action(detail=True, methods=["get"], url_path="graph-projection")
+    def graph_projection(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        from apps.core.services.branching import effective_entities, effective_relations
+        entities = effective_entities(canvas.workspace, canvas.branch)
+        relations = effective_relations(canvas.workspace, canvas.branch)
+        return Response({
+            "canvas": self.get_serializer(canvas).data,
+            "nodes": [{"id": str(e.id), "title": e.title, "type": e.type, "status": e.status, "content": e.content} for e in entities],
+            "edges": [{"id": str(r.id), "source": str(r.source_id), "target": str(r.target_id), "label": r.relation_type, "relation_type": r.relation_type, "status": "archived" if r.archived else "active"} for r in relations],
+            "layout": (canvas.snapshot or {}).get("graphLayout", {}),
+        })
+
+    @action(detail=True, methods=["get", "post"], url_path="graph-relation-proposals")
+    def graph_relation_proposals(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        if request.method == "GET":
+            rows = RelationProposal.objects.filter(canvas=canvas).select_related("source_entity", "source_proposal", "target_entity", "target_proposal")
+            return Response(RelationProposalSerializer(rows, many=True).data)
+        member = membership(request.user, canvas.workspace)
+        if not member or member.role == "reader":
+            return Response({"detail": "需要 editor 权限"}, status=403)
+        payload = dict(request.data)
+        payload["canvas"] = str(canvas.id)
+        payload["workspace"] = str(canvas.workspace_id)
+        serializer = RelationProposalSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        for endpoint in (serializer.validated_data.get("source_entity"), serializer.validated_data.get("target_entity")):
+            if endpoint and (endpoint.workspace_id != canvas.workspace_id or endpoint.status != Entity.Status.ACTIVE or endpoint.branch_id not in (None, canvas.branch_id)):
+                raise ValidationError("正式实体必须属于当前分支且处于有效状态")
+        serializer.save(workspace=canvas.workspace, canvas=canvas, status=RelationProposal.Status.PENDING)
+        return Response(serializer.data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="graph-preview")
+    def graph_preview(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        return Response(CanvasCommitService.preview(canvas, [], request.data.get("relation_proposal_ids", [])))
+
+    @action(detail=True, methods=["post"], url_path="graph-commit")
+    def graph_commit(self, request, pk=None):
+        canvas = self._graph_canvas(request, pk)
+        member = membership(request.user, canvas.workspace)
+        if not member or member.role == "reader":
+            return Response({"detail": "需要 editor 权限"}, status=403)
+        try:
+            job, entities, relations = CanvasCommitService.commit(canvas, [], request.data.get("relation_proposal_ids", []), request.data.get("idempotency_key"), request.data.get("preview_token"))
+        except CanvasCommitError as exc:
+            raise ValidationError(str(exc))
+        return Response({"job": CommitJobSerializer(job).data, "entities": EntitySerializer(entities, many=True).data, "relations": RelationSerializer(relations, many=True).data})
+
     def perform_create(self, serializer):
         workspace = serializer.validated_data["workspace"]
         if not membership(self.request.user, workspace) or membership(self.request.user, workspace).role == "reader":
