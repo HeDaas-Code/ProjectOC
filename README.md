@@ -6,7 +6,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/HeDaas-Code/ProjectOC/actions"><img src="https://img.shields.io/github/actions/workflow/status/HeDaas-Code/ProjectOC/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/HeDaas-Code/ProjectOC?style=flat-square" alt="License"></a>
   <a href="docs/migration.md"><img src="https://img.shields.io/badge/canvas-tldraw--sync--v2-658675?style=flat-square" alt="tldraw-sync-v2"></a>
   <a href="https://github.com/HeDaas-Code/ProjectOC"><img src="https://img.shields.io/github/stars/HeDaas-Code/ProjectOC?style=flat-square" alt="GitHub stars"></a>
