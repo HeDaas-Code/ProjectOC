@@ -1,116 +1,158 @@
 # 未定之书 · ProjectOC
 
-**把角色、世界规则与故事灵感，整理成可审核、可追溯的世界观。**
+<p align="center">
+  <strong>把灵感整理成可审核、可追溯、可协作的世界观。</strong><br>
+  面向原创角色与世界观创作者的自托管设定工作台
+</p>
 
-ProjectOC 是面向原创角色（Original Character，OC）创作者的自托管工作台。你可以在无限画布上整理设定，通过 AI 对话完善想法，再把审核后的草稿纳入正式世界观，与受邀成员一起编辑。
+<p align="center">
+  <a href="https://github.com/HeDaas-Code/ProjectOC/actions"><img src="https://img.shields.io/github/actions/workflow/status/HeDaas-Code/ProjectOC/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/HeDaas-Code/ProjectOC?style=flat-square" alt="License"></a>
+  <a href="docs/migration.md"><img src="https://img.shields.io/badge/canvas-tldraw--sync--v2-658675?style=flat-square" alt="tldraw-sync-v2"></a>
+  <a href="https://github.com/HeDaas-Code/ProjectOC"><img src="https://img.shields.io/github/stars/HeDaas-Code/ProjectOC?style=flat-square" alt="GitHub stars"></a>
+</p>
 
-[快速启动](#快速启动) · [功能](#功能) · [文档](#文档) · [参与开发](CONTRIBUTING.md) · [MIT 许可](LICENSE)
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#核心体验">核心体验</a> ·
+  <a href="#系统架构">系统架构</a> ·
+  <a href="#开发与测试">开发与测试</a> ·
+  <a href="docs/README.md">完整文档</a>
+</p>
 
-> 当前处于开发阶段，适用于本地使用和私有网络协作。画布统一使用官方 TLDraw 同步；旧 `records-v1` 已退役。正式部署仍需完成许可、HTTPS/WSS 和备份恢复验收。
+> 当前版本适合本地使用和私有网络协作。画布统一使用官方 `tldraw-sync-v2`；历史 `records-v1` 只保留一次性迁移读取能力，已不再提供实时连接或协议降级。
 
-## 工作方式
+![ProjectOC 工作台](docs/assets/workbench.png)
+
+## ProjectOC 是什么
+
+ProjectOC 把“想到一个设定”到“它成为世界观事实”的过程拆成清晰、可回溯的步骤：
 
 ```text
-画布整理灵感 → AI 对话与草稿提案 → 人工编辑和审核 → 正式实体与关系
-                                                       ↓
-                                              Git 历史 · 图谱 · 时间轴
+灵感画布 → AI 对话 → 实体 / 关系提案 → 人工审核 → 正式世界观
+                                      ├── Git 历史
+                                      ├── 世界观图谱
+                                      └── 时间体系
 ```
 
-AI 生成内容先进入提案，审核后才成为正式设定。PostgreSQL 保存正式数据，Git 记录世界观内容历史，Neo4j 提供可重建的图谱投影。
+AI 的输出永远先进入提案区。只有经过明确审核，内容才会写入正式实体或关系；布局、分支和同步状态则由独立的画布层管理。
 
-## 功能
+## 核心体验
 
-| 功能 | 可以做什么 |
-| --- | --- |
-| 无限画布 | 整理 Markdown、LaTeX、Mermaid 和实体草稿，使用手绘、箭头与便签 |
-| AI 对话 | 使用兼容 OpenAI 接口的模型服务，流式回复、整理提案和维护工作记忆 |
-| 提案审核 | 编辑实体与关系、查看提交前差异，确认后纳入正式世界观 |
-| 知识图谱 | 查看关系、出链和反向链接，分析最短路径与影响范围 |
-| 时间体系 | 定义日历和时间换算，查看事件、人物生命周期及时间切片 |
-| 分支与历史 | 在工作分支中探索设定，审核三方合并差异，查看 Git 历史与时间轴版本差异 |
-| 私有协作 | 邀请 owner/editor/reader 成员，通过官方 TLDraw 同步共享画布 |
-| 维护与恢复 | 查看同步、Git 和投影任务状态，重试失败任务，备份与恢复数据 |
+### 灵感先行
 
-没有配置模型 API 密钥时，AI 对话使用离线规则演示模式。它用于体验提案流程，不具备在线模型的生成能力。
+在无限画布中整理 Markdown、LaTeX、Mermaid、便签和实体草稿。草稿可以反复修改，不会污染正式世界观。
 
-## 快速启动
+### 提案审核
 
-需要安装 Docker 和支持 `--wait` 的 Docker Compose。以下命令在仓库根目录执行：
+实体和关系都有明确状态、来源和提交前预览。你可以逐条接受、拒绝或修改提案，也可以在写入正式数据前查看差异。
+
+### TLDraw 世界观图谱
+
+每个 `workspace / branch` 拥有独立图谱画板：
+
+- 正式实体使用稳定 `entity:<uuid>` 节点；
+- 正式关系使用稳定 `relation:<uuid>` 绑定箭头；
+- 移动节点时关系边自动跟随；
+- 支持自动布局、类型筛选、孤立节点和失效节点筛选；
+- 支持节点详情、关系详情、路径分析和影响范围分析；
+- reader 可以查看，editor 可以提出修改，owner 可以管理画布与分支。
+
+### 分支与历史
+
+在分支中探索设定，审核后再合并回主线。正式数据由 PostgreSQL 保存，Git 记录内容历史，图谱布局由 `tldraw-sync-v2` 保存，Neo4j 作为可重建投影。
+
+## 快速开始
+
+需要 Docker 和支持 `--wait` 的 Docker Compose：
 
 ```bash
 git clone https://github.com/HeDaas-Code/ProjectOC.git
 cd ProjectOC
-
-# 已有 .env 时保留原配置；按需填写模型服务和本地端口。
 [ -f .env ] || cp .env.example .env
-
 docker compose up -d --build --wait --wait-timeout 180
 ```
 
-首次构建需要下载镜像与依赖。Compose 会启动 PostgreSQL、Redis、Neo4j、后端、画布同步服务、前端和后台任务 worker。
+打开工作台：
 
-| 地址 | 用途 |
-| --- | --- |
-| [localhost:5173](http://localhost:5173/) | 工作台；首次使用创建 Owner，之后通过邀请加入成员 |
-| [localhost:8000/health/](http://localhost:8000/health/) | 后端健康检查 |
-| [localhost:8787/health](http://localhost:8787/health) | 画布同步协议、房间与持久化状态 |
-
-端口默认只绑定 `127.0.0.1`。可通过 `.env` 中的 `FRONTEND_PORT`、`BACKEND_PORT` 和 `SYNC_PORT` 调整；前端端口变化时也要更新 CORS、CSRF 和 WebSocket origin 配置，同步端口变化时更新 `SYNC_SERVICE_URL`。
+- [http://localhost:5173](http://localhost:5173/) · 前端工作台
+- [http://localhost:8000/health/](http://localhost:8000/health/) · 后端健康检查
+- [http://localhost:8787/health](http://localhost:8787/health) · 画布同步服务状态
 
 常用命令：
 
 ```bash
 docker compose ps
 docker compose logs --tail=100 backend sync-service outbox-worker
-
-# 更新镜像并重新启动
 docker compose up -d --build --wait --wait-timeout 180
-
-# 停止服务，保留数据库卷和世界观文件
-docker compose down
+docker compose down                 # 保留数据卷
+docker compose down -v              # 删除数据库卷，谨慎使用
 ```
 
-`docker compose down -v` 会删除数据库卷，不用于普通停止或升级。世界观内容保存在 `world_repos/`，请与数据库一起备份。
+默认端口只绑定到 `127.0.0.1`。需要远程访问时，请同时配置 HTTPS/WSS、CORS、CSRF、WebSocket origin、独立密钥和备份策略。
 
-## 架构与目录
+## 系统架构
 
-| 部分 | 技术与职责 |
-| --- | --- |
-| 前端 | Vue 3、TypeScript、Pinia、Vite；通过 React 适配 TLDraw |
-| 后端 | Django REST Framework；账户权限、世界观数据、提案审核与 AI 编排 |
-| 同步服务 | Node.js、WebSocket、官方 `TLSocketRoom` / `SQLiteSyncStorage` |
-| 数据与任务 | PostgreSQL、Redis 房间租约、Git 内容仓库、Neo4j 图谱投影、持久化 outbox worker |
-
-```text
-ProjectOC/
-├── backend/        # Django 应用、迁移与测试
-├── frontend/       # Vue 工作台、TLDraw 适配与浏览器测试
-├── sync-service/   # 官方画布同步与历史数据迁移
-├── deploy/         # 私有部署、备份恢复与 staging 脚本
-├── docs/           # 当前指南与归档设计文档
-└── world_repos/    # 本地世界观内容仓库，内容不提交到应用源码仓库
+```mermaid
+flowchart LR
+  A[Vue 工作台] --> B[React / TLDraw 适配层]
+  B <-->|tldraw-sync-v2| C[Sync Service]
+  C --> D[(PostgreSQL 快照与事件)]
+  A --> E[Django REST API]
+  E --> D
+  E --> F[(Git 世界观仓库)]
+  E --> G[(Neo4j 可重建投影)]
+  E --> H[Redis 房间租约]
+  E --> I[Outbox Worker]
 ```
 
-架构和一致性边界见 [架构说明](docs/architecture.md)。
+| 模块 | 技术 | 职责 |
+| --- | --- | --- |
+| `frontend/` | Vue 3、TypeScript、Pinia、Vite | 工作台、提案审核、图谱和时间线 |
+| `backend/` | Django、Django REST Framework | 账户、权限、实体关系、分支、提案与任务 |
+| `sync-service/` | Node.js、`TLSocketRoom`、`SQLiteSyncStorage` | 官方 TLDraw 协议、房间租约、重连和持久化 |
+| `world_repos/` | Git | 世界观内容历史；不提交到应用源码仓库 |
+| PostgreSQL / Redis / Neo4j | 数据与基础设施 | 正式数据、租约、可重建图谱投影 |
 
-## 当前限制
+## 数据安全与一致性
 
-- 实时连接成功不代表 PostgreSQL 已落盘；升级和备份前应检查同步服务的 `pending_persistence` 与 `last_error`。
-- 画布自动同步不等于所有并发文本修改都能无损合并。长期离线、强制终止进程和数据库故障等场景仍需专项验收。
-- 旧协议仅保留历史快照与操作日志的只读迁移能力，不提供实时连接或降级；旧浏览器未发送的操作需导出后人工核对。
-- 默认 Compose 是本地开发配置。私有部署需使用 HTTPS/WSS、独立密钥、数据库与 Git 备份，以及有效的 TLDraw 生产许可。
+- AI 内容不会绕过审核直接成为正式事实。
+- 后端始终执行 owner/editor/reader 权限，前端禁用按钮不是安全边界。
+- snapshot 保存使用版本检查，冲突不会静默覆盖更新内容。
+- Neo4j 投影失败不会回滚已经提交的 PostgreSQL 数据，outbox worker 会继续重试。
+- `records-v1` 仅用于历史迁移读取，实时 WebSocket 请求会被拒绝。
+- 生产环境请为数据库、Git 世界观仓库和同步快照制定联合备份与恢复演练。
+
+## 开发与测试
+
+```bash
+# 后端
+.venv/bin/python backend/manage.py check
+.venv/bin/python -m pytest backend/tests -q
+
+# 前端
+cd frontend
+npm ci
+npm run build
+
+# 同步服务
+cd sync-service
+npm ci
+npm test
+```
+
+开发分支约定：从 `main` 创建 `codex/<topic>` 或其他功能分支；保持小而可回滚的提交，提交 PR 到 `main`，不要直接向主线推送开发提交。
 
 ## 文档
 
-| 文档 | 内容 |
-| --- | --- |
-| [文档索引](docs/README.md) | 按使用、开发、部署和历史资料查找 |
-| [开发指南](docs/development.md) | 本地开发、依赖安装和测试命令 |
-| [架构说明](docs/architecture.md) | 模块职责、数据源与同步流程 |
-| [部署与运维](deploy/README.md) | HTTPS/WSS、配置、备份与恢复 |
-| [旧协议升级](docs/migration.md) | `records-v1` 退役、历史数据与本地备份 |
-| [同步服务](sync-service/README.md) | 官方房间协议、租约和健康检查 |
+- [文档索引](docs/README.md)
+- [开发指南](docs/development.md)
+- [架构说明](docs/architecture.md)
+- [部署与运维](deploy/README.md)
+- [旧协议升级](docs/migration.md)
+- [同步服务说明](sync-service/README.md)
+- [贡献指南](CONTRIBUTING.md)
 
 ## 许可
 
-项目源码使用 [MIT License](LICENSE)。第三方依赖、模型服务与 TLDraw 生产许可按各自条款使用。
+源码使用 [MIT License](LICENSE)。第三方依赖、模型服务和 TLDraw 生产许可按各自条款使用。
