@@ -21,7 +21,7 @@ onMounted(async () => {
     role.value = ticket.role
     let first: typeof ticket | undefined = ticket
     const uri = async () => { const current = first || await api<typeof ticket>(`canvases/${props.canvas.id}/sync-ticket/`, 'POST', { client_id: clientId }); first = undefined; return `${current.url}?ticket=${encodeURIComponent(current.ticket)}&protocol=tldraw-sync-v2&schema=oc-tldraw-2&branch=${encodeURIComponent(current.branch)}` }
-    root.render(React.createElement(OfficialCollaborativeCanvas, { uri, readOnly: ticket.role === 'reader', licenseKey: import.meta.env.VITE_TLDRAW_LICENSE_KEY || undefined, onStatus: (value: string, error?: Error) => { status.value = value; if (error) emit('error', error.message) }, onMount: (editor: Editor) => { if (disposed) return; activeEditor = editor; if (role.value !== 'reader') syncGraphProjection(editor, props.nodes, props.edges); stopSelection = react('graph selection', () => { const shape = editor.getSelectedShapes()[0]; if (shape?.type === 'oc-entity') emit('select', shape.props.entityId); else if (shape?.type === 'arrow' && String(shape.id).includes('relation:')) emit('relation', String(shape.id).split('relation:')[1]) }) } }))
+    root.render(React.createElement(OfficialCollaborativeCanvas, { uri, readOnly: ticket.role === 'reader', licenseKey: import.meta.env.VITE_TLDRAW_LICENSE_KEY || undefined, onStatus: (value: string, error?: Error) => { status.value = value; if (error) emit('error', error.message) }, onMount: (editor: Editor) => { if (disposed) return; activeEditor = editor; syncGraphProjection(editor, props.nodes, props.edges); stopSelection = react('graph selection', () => { const shape = editor.getSelectedShapes()[0]; if (shape?.type === 'oc-entity') emit('select', shape.props.entityId); else if (shape?.type === 'arrow' && String(shape.id).includes('relation:')) emit('relation', String(shape.id).split('relation:')[1]) }) } }))
   } catch (error) { status.value = '实时协作连接失败'; emit('error', String(error)) }
 })
 function autoLayout() {
@@ -29,7 +29,7 @@ function autoLayout() {
   const shapes = activeEditor.getCurrentPageShapes().filter(s => s.type === 'oc-entity').sort((a, b) => a.props.entityType.localeCompare(b.props.entityType) || a.props.title.localeCompare(b.props.title))
   activeEditor.updateShapes(shapes.map((s, i) => ({ id: s.id, type: s.type, x: 120 + i % 4 * 280, y: 120 + Math.floor(i / 4) * 150 })))
 }
-watch(() => [props.nodes, props.edges], () => { if (activeEditor && role.value !== 'reader') syncGraphProjection(activeEditor, props.nodes, props.edges) })
+watch(() => [props.nodes, props.edges], () => { if (activeEditor) syncGraphProjection(activeEditor, props.nodes, props.edges) })
 onBeforeUnmount(() => { disposed = true; stopSelection?.(); root?.unmount() })
 </script>
 <template>
