@@ -236,6 +236,24 @@ class DialogueToolView(APIView):
             result = [{"id": str(row.id), "title": row.title, "type": row.type, "content": row.content} for row in rows]
             finish(AgentRun.Status.COMPLETED, {"result": result})
             return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)})
+        if tool == "read_context":
+            from apps.canvas.models import CanvasContainer
+            container = CanvasContainer.objects.filter(canvas=session.canvas).first() if session.canvas else None
+            result = {
+                "workspace_id": str(session.workspace_id),
+                "branch_id": str(session.canvas.branch_id) if session.canvas and session.canvas.branch_id else None,
+                "canvas": {
+                    "id": str(session.canvas_id),
+                    "name": session.canvas.name,
+                    "purpose": session.canvas.purpose,
+                    "snapshot_version": session.canvas.snapshot_version,
+                } if session.canvas else None,
+                "container": {"id": str(container.id), "name": container.name} if container else None,
+                "entity_count": len(effective_entities(session.workspace, session.canvas.branch if session.canvas else None)),
+                "scope": "当前会话画布及其所属分支",
+            }
+            finish(AgentRun.Status.COMPLETED, result)
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)})
         if tool == "create_draft":
             if not session.canvas or session.canvas.purpose != StagingCanvas.Purpose.STAGING:
                 finish(AgentRun.Status.FAILED, error_code="staging_canvas_required")

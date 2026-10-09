@@ -124,6 +124,13 @@ class MvpApiTests(TestCase):
         denied = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "delete_everything", "arguments": {}}, format="json")
         self.assertEqual(denied.status_code, 400)
 
+    def test_copilot_read_context_is_scoped_and_read_only(self):
+        session = self.client.post(f"/api/v1/dialogue/sessions/", {"workspace": self.workspace_id, "canvas": self.canvas_id}, format="json")
+        response = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "read_context", "arguments": {}}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["result"]["canvas"]["id"], self.canvas_id)
+        self.assertEqual(EntityProposal.objects.count(), 0)
+
 
     def tearDown(self):
         self.settings_override.disable()
