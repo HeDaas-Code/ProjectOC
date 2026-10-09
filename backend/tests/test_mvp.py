@@ -116,6 +116,8 @@ class MvpApiTests(TestCase):
         events = self.client.get(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/")
         self.assertEqual(events.status_code, 200)
         self.assertEqual(events.data["events"][-1]["tool"], "create_draft")
+        cancelled = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "cancel_event", "arguments": {"event_id": events.data["events"][-1]["id"]}}, format="json")
+        self.assertEqual(cancelled.status_code, 409)
         denied = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "delete_everything", "arguments": {}}, format="json")
         self.assertEqual(denied.status_code, 400)
 

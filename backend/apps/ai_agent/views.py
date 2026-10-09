@@ -153,6 +153,20 @@ class DialogueToolView(APIView):
             return Response({"detail": "需要 editor 权限"}, status=403)
         tool = str(request.data.get("tool", ""))
         args = request.data.get("arguments") if isinstance(request.data.get("arguments"), dict) else {}
+        if tool == "cancel_event":
+            event_id = str(args.get("event_id", ""))
+            context = dict(session.context or {})
+            events = list(context.get("copilot_events", []))
+            found = next((event for event in events if event.get("id") == event_id), None)
+            if not found:
+                return Response({"detail": "copilot event not found"}, status=404)
+            if found.get("status") == "completed":
+                return Response({"detail": "已完成的工具不能取消"}, status=409)
+            found["status"] = "cancelled"
+            found["cancelled_at"] = timezone.now().isoformat()
+            session.context = {**context, "copilot_events": events[-50:]}
+            session.save(update_fields=["context", "updated_at"])
+            return Response({"tool": tool, "status": "cancelled", "event": found})
         def record(status_value, result=None, error=None):
             context = dict(session.context or {})
             events = list(context.get("copilot_events", []))[-49:]
