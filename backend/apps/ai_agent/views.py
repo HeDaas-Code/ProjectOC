@@ -293,6 +293,23 @@ class DialogueToolView(APIView):
             result = {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}
             finish(AgentRun.Status.COMPLETED, result)
             return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)}, status=201)
+        if tool == "organize_canvas":
+            if not session.canvas:
+                finish(AgentRun.Status.FAILED, error_code="canvas_required")
+                return Response({"detail": "副驾驶必须绑定画布"}, status=400)
+            store = (session.canvas.snapshot or {}).get("store", {})
+            shapes = [value for value in store.values() if isinstance(value, dict) and value.get("typeName") == "shape"]
+            columns = max(1, int(args.get("columns", 4) or 4))
+            spacing_x, spacing_y = 280, 180
+            operations = []
+            for index, shape in enumerate(sorted(shapes, key=lambda item: str(item.get("id", "")))):
+                current = shape.get("x"), shape.get("y")
+                target = (index % columns) * spacing_x, (index // columns) * spacing_y
+                if current != target:
+                    operations.append({"shape_id": shape.get("id"), "from": current, "to": target})
+            result = {"operations": operations, "count": len(operations), "requires_review": False, "applied": False, "reason": "布局操作需由官方同步房间以当前版本执行"}
+            finish(AgentRun.Status.COMPLETED, result)
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)})
         if tool == "consistency_check":
             result = build_consistency_report(session.workspace, session.canvas.branch if session.canvas else None)
             finish(AgentRun.Status.COMPLETED, result)
