@@ -11,9 +11,10 @@ from apps.canvas.models import (
     DialogueMemoryAudit,
     DialogueSession,
     EntityProposal,
+    RelationProposal,
     StagingCanvas,
 )
-from apps.core.models import Entity, WorldBranch, WorldWorkspace
+from apps.core.models import Entity, Relation, WorldBranch, WorldWorkspace
 from apps.core.services.branching import effective_entities
 from apps.core.services.consistency import build_consistency_report
 from django.conf import settings
@@ -263,6 +264,32 @@ class DialogueToolView(APIView):
                 finish(AgentRun.Status.FAILED, error_code="title_required")
                 return Response({"detail": "title is required"}, status=400)
             proposal = EntityProposal.objects.create(workspace=session.workspace, canvas=session.canvas, dialogue_session=session, source=EntityProposal.Source.AI, entity_type=str(args.get("entity_type", Entity.EntityType.FLOATING_TIP)), title=title, content=str(args.get("content", "")), metadata={"copilot_tool": tool})
+            result = {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}
+            finish(AgentRun.Status.COMPLETED, result)
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)}, status=201)
+        if tool == "propose_relation":
+            if not session.canvas or session.canvas.purpose != StagingCanvas.Purpose.STAGING:
+                finish(AgentRun.Status.FAILED, error_code="staging_canvas_required")
+                return Response({"detail": "副驾驶必须绑定灵感子画布"}, status=400)
+            source_id = args.get("source_entity")
+            target_id = args.get("target_entity")
+            source = Entity.objects.filter(id=source_id, workspace=session.workspace).first()
+            target = Entity.objects.filter(id=target_id, workspace=session.workspace).first()
+            relation_type = str(args.get("relation_type", "LINKED_TO"))
+            valid_types = {value for value, _ in Relation.RelationType.choices}
+            if not source or not target or source.id == target.id or relation_type not in valid_types:
+                finish(AgentRun.Status.FAILED, error_code="invalid_relation_endpoints")
+                return Response({"detail": "关系端点或关系类型无效"}, status=400)
+            proposal = RelationProposal.objects.create(
+                workspace=session.workspace,
+                canvas=session.canvas,
+                source_entity=source,
+                target_entity=target,
+                relation_type=relation_type,
+                confidence=float(args.get("confidence", 0.0) or 0.0),
+                reason=str(args.get("reason", "")),
+                properties=args.get("properties") if isinstance(args.get("properties"), dict) else {},
+            )
             result = {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}
             finish(AgentRun.Status.COMPLETED, result)
             return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)}, status=201)

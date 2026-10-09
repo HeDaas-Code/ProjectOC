@@ -3,7 +3,7 @@ from pathlib import Path
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityCanvasReference, EntityProposal, StagingCanvas
+from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityCanvasReference, EntityProposal, RelationProposal, StagingCanvas
 from apps.core.models import CommitJob, Entity, Relation, WorldBranch, WorldWorkspace
 from apps.ai_agent.models import AgentRun, AgentToolCallAudit
 
@@ -130,6 +130,15 @@ class MvpApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["result"]["canvas"]["id"], self.canvas_id)
         self.assertEqual(EntityProposal.objects.count(), 0)
+
+    def test_copilot_relation_tool_creates_reviewable_proposal(self):
+        workspace = WorldWorkspace.objects.get(id=self.workspace_id)
+        first = Entity.objects.create(workspace=workspace, type="character", title="甲")
+        second = Entity.objects.create(workspace=workspace, type="character", title="乙")
+        session = self.client.post(f"/api/v1/dialogue/sessions/", {"workspace": self.workspace_id, "canvas": self.canvas_id}, format="json")
+        response = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "propose_relation", "arguments": {"source_entity": str(first.id), "target_entity": str(second.id), "relation_type": "LINKED_TO"}}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(RelationProposal.objects.filter(id=response.data["result"]["proposal_id"], status="pending").exists())
 
 
     def tearDown(self):
