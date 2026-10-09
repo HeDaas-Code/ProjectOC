@@ -143,7 +143,19 @@ class DialogueToolView(APIView):
         session = DialogueSession.objects.filter(id=session_id).first()
         if not session or not membership(request.user, session.workspace):
             return Response({"detail": "dialogue session not found"}, status=404)
-        return Response({"events": list((session.context or {}).get("copilot_events", []))})
+        runs = AgentRun.objects.filter(dialogue_session=session).order_by("-created_at")[:50]
+        return Response({
+            "events": list((session.context or {}).get("copilot_events", [])),
+            "runs": [{
+                "id": str(run.id),
+                "status": run.status,
+                "mode": run.mode,
+                "created_at": run.created_at,
+                "completed_at": run.completed_at,
+                "error_code": run.error_code,
+                "tool_calls": list(run.tool_calls.values("tool_name", "status", "latency_ms", "error_code")),
+            } for run in runs],
+        })
 
     def post(self, request, session_id):
         session = DialogueSession.objects.select_related("workspace", "canvas", "canvas__branch").filter(id=session_id).first()
