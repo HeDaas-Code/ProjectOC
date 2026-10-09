@@ -16,7 +16,9 @@ const activeQuestion = computed(() => {
 })
 const noteInput = ref('')
 const auditOpen = ref(false)
-const activeView = ref<'dialogue' | 'memory' | 'analysis'>('dialogue')
+const activeView = ref<'dialogue' | 'memory' | 'analysis' | 'tools'>('dialogue')
+const copilotEvents = ref<any[]>([])
+async function loadCopilotEvents() { if (!store.session) return; try { copilotEvents.value = (await api<{ events: any[] }>(`dialogue/sessions/${store.session.id}/tools/`)).events } catch (error) { store.error = String(error) } }
 const analysisMode = ref<'consistency' | 'timeline'>('consistency')
 const analysisRun = ref<AgentRun>()
 const analysisFindings = ref<AgentFinding[]>([])
@@ -209,6 +211,9 @@ function askEvidence(evidence: AgentEvidence) {
       >
         Agent 分析
       </button>
+      <button type="button" :class="{ active: activeView === 'tools' }" :aria-selected="activeView === 'tools'" @click="activeView = 'tools'; loadCopilotEvents()">
+        工具记录 <small v-if="copilotEvents.length">{{ copilotEvents.length }}</small>
+      </button>
     </nav>
 
     <div v-if="showDialogueIntro" class="panel-heading dialogue-intro">
@@ -285,6 +290,12 @@ function askEvidence(evidence: AgentEvidence) {
           </button>
         </div>
       </form>
+    </section>
+
+    <section v-else-if="activeView === 'tools'" class="copilot-events" aria-label="副驾驶工具记录">
+      <div class="panel-heading"><span class="eyebrow">COPILOT AUDIT</span><h2>副驾驶工具记录</h2><p>工具只能创建待审核草稿，不能直接修改正式实体。</p></div>
+      <article v-for="event in copilotEvents" :key="event.id" class="copilot-event"><header><strong>{{ event.tool }}</strong><small>{{ new Date(event.created_at).toLocaleString() }}</small></header><span>{{ event.status }}</span><pre>{{ JSON.stringify(event.arguments, null, 2) }}</pre></article>
+      <p v-if="!copilotEvents.length" class="muted">暂无工具调用记录。</p>
     </section>
 
     <section
