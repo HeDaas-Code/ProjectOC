@@ -167,12 +167,19 @@ class EntityProposal(models.Model):
         REJECTED = "rejected", "已拒绝"
         SUPERSEDED = "superseded", "已替代"
 
+    class Operation(models.TextChoices):
+        CREATE = "create", "创建"
+        UPDATE = "update", "修改"
+        ARCHIVE = "archive", "归档"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey(WorldWorkspace, on_delete=models.CASCADE, related_name="entity_proposals")
     canvas = models.ForeignKey(StagingCanvas, on_delete=models.CASCADE, related_name="entity_proposals")
     dialogue_session = models.ForeignKey(DialogueSession, on_delete=models.SET_NULL, null=True, blank=True, related_name="entity_proposals")
     source_message = models.ForeignKey(DialogueMessage, on_delete=models.SET_NULL, null=True, blank=True, related_name="entity_proposals")
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.AI)
+    operation = models.CharField(max_length=20, choices=Operation.choices, default=Operation.CREATE)
+    target_entity = models.ForeignKey(Entity, on_delete=models.SET_NULL, null=True, blank=True, related_name="edit_proposals")
     entity_type = models.CharField(max_length=50, choices=Entity.EntityType.choices)
     title = models.CharField(max_length=500)
     content = models.TextField(blank=True, default="")

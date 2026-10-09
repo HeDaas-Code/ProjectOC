@@ -704,6 +704,14 @@ class EntityProposalViewSet(viewsets.ModelViewSet):
             raise ValidationError("需要 editor 权限")
         if serializer.validated_data["workspace"] != canvas.workspace:
             raise ValidationError("画布与世界观不匹配")
+        target = serializer.validated_data.get("target_entity")
+        operation = serializer.validated_data.get("operation", EntityProposal.Operation.CREATE)
+        if operation != EntityProposal.Operation.CREATE:
+            if not target or target.workspace_id != canvas.workspace_id or target.branch_id != canvas.branch_id:
+                raise ValidationError("修改提案的目标实体必须属于当前画布分支")
+            if operation == EntityProposal.Operation.ARCHIVE:
+                serializer.validated_data["title"] = target.title
+                serializer.validated_data["content"] = target.content
         serializer.save(source="user", status="pending", dialogue_session=None, source_message=None)
 
     def partial_update(self, request, *args, **kwargs):

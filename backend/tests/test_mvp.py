@@ -81,6 +81,25 @@ class MvpApiTests(TestCase):
         self.assertEqual(client.patch(f"/api/v1/canvas-containers/{container.id}/", {"name": "禁止"}, format="json").status_code, 403)
         self.assertEqual(client.delete(f"/api/v1/canvas-containers/{container.id}/").status_code, 403)
 
+    def test_existing_entity_update_requires_review_and_preview(self):
+        canvas = StagingCanvas.objects.get(pk=self.canvas_id)
+        entity = Entity.objects.create(workspace=canvas.workspace, branch_id=canvas.branch_id, type="character", title="旧名", content="旧内容")
+        proposal = self.client.post("/api/v1/proposals/", {
+            "workspace": self.workspace_id, "canvas": self.canvas_id, "operation": "update",
+            "target_entity": str(entity.id), "entity_type": "character", "title": "新名", "content": "新内容",
+        }, format="json")
+        self.assertEqual(proposal.status_code, 201, proposal.data)
+        entity.refresh_from_db()
+        self.assertEqual(entity.title, "旧名")
+        preview = self.client.post(f"/api/v1/canvases/{self.canvas_id}/preview/", {"proposal_ids": [proposal.data["id"]], "relation_proposal_ids": []}, format="json")
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn('"operation": "update"', preview.data["diff"])
+        commit = self.client.post(f"/api/v1/canvases/{self.canvas_id}/commit/", {"proposal_ids": [proposal.data["id"]], "relation_proposal_ids": [], "idempotency_key": "entity-update-review", "preview_token": preview.data["preview_token"]}, format="json")
+        self.assertEqual(commit.status_code, 200, commit.data)
+        entity.refresh_from_db()
+        self.assertEqual(entity.title, "新名")
+        self.assertEqual(entity.content, "新内容")
+
 
     def tearDown(self):
         self.settings_override.disable()

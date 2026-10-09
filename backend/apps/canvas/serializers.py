@@ -129,7 +129,7 @@ class EntityProposalSerializer(serializers.ModelSerializer):
         model = EntityProposal
         fields = [
             "id", "workspace", "canvas", "canvas_name", "dialogue_session", "source_message",
-            "source", "source_label", "entity_type", "entity_type_label", "title", "content",
+            "source", "source_label", "operation", "target_entity", "entity_type", "entity_type_label", "title", "content",
             "metadata", "conflicts", "status", "created_entity", "suggested_relations",
             "created_at", "updated_at",
         ]

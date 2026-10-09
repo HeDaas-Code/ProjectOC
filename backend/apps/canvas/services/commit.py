@@ -39,7 +39,7 @@ class CanvasCommitService:
             raise CanvasCommitError("至少选择一个实体或关系提案")
 
         proposals = list(
-            EntityProposal.objects.filter(canvas=canvas, id__in=proposal_ids).order_by("id")
+            EntityProposal.objects.filter(canvas=canvas, id__in=proposal_ids).select_related("target_entity").order_by("id")
         )
         relations = list(
             RelationProposal.objects.filter(canvas=canvas, id__in=relation_ids)
@@ -62,6 +62,11 @@ class CanvasCommitService:
                 raise CanvasCommitError("只能提交待审核实体提案")
             if not proposal.title.strip() or proposal.entity_type not in Entity.EntityType.values:
                 raise CanvasCommitError("实体标题或类型无效")
+            if proposal.operation == EntityProposal.Operation.CREATE:
+                if proposal.target_entity_id:
+                    raise CanvasCommitError("创建提案不能指定目标实体")
+            elif not proposal.target_entity or proposal.target_entity.workspace_id != canvas.workspace_id or proposal.target_entity.branch_id != canvas.branch_id:
+                raise CanvasCommitError("修改目标不属于当前画布分支")
 
         for relation in relations:
             if relation.status != RelationProposal.Status.PENDING or relation.created_relation_id:
@@ -112,6 +117,8 @@ class CanvasCommitService:
             "entities": [
                 {
                     "proposal_id": str(proposal.id),
+                    "operation": proposal.operation,
+                    "target_entity": str(proposal.target_entity_id) if proposal.target_entity_id else None,
                     "type": proposal.entity_type,
                     "title": proposal.title,
                     "content": proposal.content,
@@ -197,14 +204,22 @@ class CanvasCommitService:
                     "proposal": str(proposal.id),
                     "confirmed_at": confirmed_at,
                 }
-                entity = Entity.objects.create(
-                    workspace=canvas.workspace,
-                    branch=canvas.branch,
-                    type=proposal.entity_type,
-                    title=proposal.title.strip(),
-                    content=proposal.content,
-                    metadata={**proposal.metadata, "provenance": provenance},
-                )
+                if proposal.operation == EntityProposal.Operation.CREATE:
+                    entity = Entity.objects.create(
+                        workspace=canvas.workspace, branch=canvas.branch, type=proposal.entity_type,
+                        title=proposal.title.strip(), content=proposal.content,
+                        metadata={**proposal.metadata, "provenance": provenance},
+                    )
+                else:
+                    entity = Entity.objects.select_for_update().get(pk=proposal.target_entity_id)
+                    entity.title = proposal.title.strip()
+                    entity.content = proposal.content
+                    entity.type = proposal.entity_type
+                    entity.metadata = {**entity.metadata, **proposal.metadata, "provenance": provenance}
+                    if proposal.operation == EntityProposal.Operation.ARCHIVE:
+                        entity.status = Entity.Status.ARCHIVED
+                    entity.sync_status = Entity.SyncStatus.PENDING
+                    entity.save(update_fields=["title", "content", "type", "metadata", "status", "sync_status", "updated_at"])
                 proposal.created_entity = entity
                 proposal.status = EntityProposal.Status.ACCEPTED
                 proposal.save(update_fields=["created_entity", "status", "updated_at"])

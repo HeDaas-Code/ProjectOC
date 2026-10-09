@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { api } from '../services/api'
 import { entityTypes, type Entity } from '../types'
 const props = defineProps<{ id: string; workspace: string; branch: string }>()
-const emit = defineEmits<{ close: []; error: [message: string]; select: [id: string] }>()
+const emit = defineEmits<{ close: []; error: [message: string]; select: [id: string]; edit: [entity: Entity] }>()
 const entity = ref<Entity>()
 const links = ref<{ outgoing: any[]; incoming: any[] }>()
 const loading = ref(false)
@@ -26,7 +26,7 @@ watch(() => [props.id, props.workspace, props.branch], async () => {
     <p v-if="loading" role="status">正在读取实体…</p>
     <template v-if="entity">
       <small>{{ entityTypes[entity.type] }} · {{ entity.status === 'active' ? '有效' : '已归档' }}</small>
-      <h2>{{ entity.title }}</h2><p class="entity-content">{{ entity.content }}</p>
+      <h2>{{ entity.title }}</h2><button @click="emit('edit', entity)">提出修改提案</button><p class="entity-content">{{ entity.content }}</p>
       <h3>关联关系</h3>
       <button v-for="link in links?.outgoing" :key="link.id || link.otherEntity.id" @click="emit('select', link.otherEntity.id)">{{ link.relationLabel }} → {{ link.otherEntity.title }}</button>
       <button v-for="link in links?.incoming" :key="link.id || link.otherEntity.id" @click="emit('select', link.otherEntity.id)">{{ link.otherEntity.title }} → {{ link.relationLabel }}</button>
