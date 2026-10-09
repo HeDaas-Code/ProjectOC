@@ -198,6 +198,8 @@ class MvpApiTests(TestCase):
         canvas=StagingCanvas.objects.get(id=self.canvas_id)
         preview=self.client.post(f"/api/v1/branches/{canvas.branch_id}/merge-preview/",{},format="json")
         self.assertEqual(preview.status_code,200)
+        self.assertIn("container_changes", preview.data)
+        self.assertIn("reference_changes", preview.data)
         merged=self.client.post(f"/api/v1/branches/{canvas.branch_id}/merge/",{"preview_token":preview.data["preview_token"],"resolutions":{}},format="json")
         self.assertEqual(merged.status_code,200)
         return merged
