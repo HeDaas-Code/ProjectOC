@@ -92,6 +92,7 @@ function exportLocal() {
   URL.revokeObjectURL(url);
 }
 onMounted(async () => {
+  window.addEventListener('oc:arrange-grid', arrangeGrid);
   root = createRoot(host.value!);
   try {
     const clientId = crypto.randomUUID();
@@ -123,7 +124,7 @@ onMounted(async () => {
   } catch (error) { syncRole.value = undefined; syncStatus.value = '实时协作连接失败'; emit('error', String(error)); }
 });
 watch(() => props.proposals, proposals => { setProposals(proposals); if (canEdit.value) proposals.forEach(p => adapter!.createDraftElement(p)); }, { deep: true });
-onBeforeUnmount(() => { disposed = true; dispose?.(); root?.unmount(); });
+onBeforeUnmount(() => { disposed = true; window.removeEventListener('oc:arrange-grid', arrangeGrid); dispose?.(); root?.unmount(); });
 // Official useSync owns transport; switching tabs must never trigger a REST snapshot write.
 defineExpose({ flush: async () => {
   if (ready.value && syncStatus.value !== '实时协作已连接') throw new Error('画布尚未连接，请等待重连或导出快照后再切换');

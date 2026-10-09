@@ -27,6 +27,17 @@ async function loadCopilotEvents() {
     copilotRuns.value = payload.runs || []
   } catch (error) { store.error = String(error) }
 }
+const layoutBusy = ref(false)
+async function applyCopilotLayout() {
+  if (!store.session || layoutBusy.value) return
+  layoutBusy.value = true
+  try {
+    const response = await api<{ result?: { count?: number } }>(`dialogue/sessions/${store.session.id}/tools/`, 'POST', { tool: 'organize_canvas', arguments: {} })
+    window.dispatchEvent(new CustomEvent('oc:arrange-grid'))
+    questionNotice.value = `已应用布局整理（${response.result?.count || 0} 个节点需要移动），操作已进入官方同步流。`
+    await loadCopilotEvents()
+  } catch (error) { store.error = String(error) } finally { layoutBusy.value = false }
+}
 const analysisMode = ref<'consistency' | 'timeline'>('consistency')
 const analysisRun = ref<AgentRun>()
 const analysisFindings = ref<AgentFinding[]>([])
@@ -308,6 +319,7 @@ function askEvidence(evidence: AgentEvidence) {
         <small v-if="run.error_code">错误：{{ run.error_code }}</small>
         <ul v-if="run.tool_calls?.length"><li v-for="call in run.tool_calls" :key="`${run.id}-${call.tool_name}`">{{ call.tool_name }} · {{ call.status }} · {{ call.latency_ms }}ms</li></ul>
       </article>
+      <button type="button" class="primary" :disabled="layoutBusy || !store.session" @click="applyCopilotLayout">{{ layoutBusy ? '整理中…' : '请求 AI 整理当前画布' }}</button>
       <article v-for="event in copilotEvents" :key="event.id" class="copilot-event"><header><strong>{{ event.tool }}</strong><small>{{ new Date(event.created_at).toLocaleString() }}</small></header><span>{{ event.status }}</span><pre>{{ JSON.stringify(event.arguments, null, 2) }}</pre></article>
       <p v-if="!copilotEvents.length && !copilotRuns.length" class="muted">暂无工具调用记录。</p>
     </section>
