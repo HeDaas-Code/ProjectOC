@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from .models import (
     CanvasOperation,
     CanvasContainer,
+    EntityCanvasReference,
     CanvasRevision,
     CanvasSyncEvent,
     DialogueMessage,
@@ -41,6 +42,7 @@ from .serializers import (
     RelationProposalSerializer,
     StagingCanvasSerializer,
     CanvasContainerSerializer,
+    EntityCanvasReferenceSerializer,
 )
 from .services.commit import CanvasCommitError, CanvasCommitService
 from .services.sync_ticket import issue_sync_ticket
@@ -599,6 +601,7 @@ class CanvasContainerViewSet(viewsets.ModelViewSet):
         """Read one level without connecting to or mutating the child room."""
         container = self.get_object()
         proposals = container.canvas.entity_proposals.select_related("created_entity").exclude(status__in=["rejected", "superseded"])
+        references = container.entity_references.select_related("entity")
         return Response({
             "container": self.get_serializer(container).data,
             "version": container.canvas.snapshot_version,
@@ -606,7 +609,9 @@ class CanvasContainerViewSet(viewsets.ModelViewSet):
             "nodes": [{"id": str(p.id), "entity_id": str(p.created_entity_id) if p.created_entity_id else None,
                        "title": p.created_entity.title if p.created_entity_id else p.title,
                        "content": p.created_entity.content if p.created_entity_id else p.content,
-                       "type": p.entity_type, "status": p.status} for p in proposals],
+                       "type": p.entity_type, "status": p.status} for p in proposals] +
+                     [{"id": f"reference:{r.id}", "entity_id": str(r.entity_id), "title": r.entity.title,
+                       "content": r.entity.content, "type": r.entity.type, "status": r.entity.status} for r in references],
             "edges": RelationProposalSerializer(container.canvas.relation_proposals.exclude(status="rejected"), many=True).data,
         })
 
@@ -686,6 +691,28 @@ class CanvasContainerViewSet(viewsets.ModelViewSet):
         container.status = StagingCanvas.Status.ARCHIVED
         container.save(update_fields=["status", "updated_at"])
         return Response(status=204)
+
+class EntityCanvasReferenceViewSet(viewsets.ModelViewSet):
+    serializer_class = EntityCanvasReferenceSerializer
+    http_method_names: ClassVar[list[str]] = ["get", "post", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = EntityCanvasReference.objects.select_related("entity", "container", "workspace").filter(workspace_id__in=accessible_workspace_ids(self.request.user))
+        for field in ("workspace", "container", "entity", "branch"):
+            if self.request.query_params.get(field):
+                qs = qs.filter(**{f"{field}_id": self.request.query_params[field]})
+        return qs
+
+    def perform_create(self, serializer):
+        container = serializer.validated_data["container"]
+        entity = serializer.validated_data["entity"]
+        member = membership(self.request.user, container.workspace)
+        if not member or member.role == "reader":
+            raise PermissionDenied("需要 editor 权限")
+        if container.workspace_id != entity.workspace_id or container.branch_id != entity.branch_id:
+            raise ValidationError("实体与容器必须属于同一世界观和分支")
+        serializer.save(workspace=container.workspace, branch=container.branch)
+
 
 class EntityProposalViewSet(viewsets.ModelViewSet):
     serializer_class = EntityProposalSerializer

@@ -65,6 +65,19 @@ class CanvasContainer(models.Model):
         constraints = [models.UniqueConstraint(fields=["workspace", "parent", "name"], name="unique_container_name_under_parent")]
 
 
+class EntityCanvasReference(models.Model):
+    """A semantic entity may be placed on multiple container canvases."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(WorldWorkspace, on_delete=models.CASCADE, related_name="entity_canvas_references")
+    branch = models.ForeignKey(WorldBranch, on_delete=models.CASCADE, related_name="entity_canvas_references")
+    container = models.ForeignKey(CanvasContainer, on_delete=models.CASCADE, related_name="entity_references")
+    entity = models.ForeignKey(Entity, on_delete=models.CASCADE, related_name="canvas_references")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["container", "entity"], name="unique_entity_container_reference")]
+
+
 class DialogueSession(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "活跃"

@@ -3,7 +3,7 @@ from pathlib import Path
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityProposal, StagingCanvas
+from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityCanvasReference, EntityProposal, StagingCanvas
 from apps.core.models import CommitJob, Entity, Relation, WorldBranch, WorldWorkspace
 
 
@@ -80,6 +80,13 @@ class MvpApiTests(TestCase):
         self.assertEqual(client.get(f"/api/v1/canvas-containers/{container.id}/projection/").status_code, 200)
         self.assertEqual(client.patch(f"/api/v1/canvas-containers/{container.id}/", {"name": "禁止"}, format="json").status_code, 403)
         self.assertEqual(client.delete(f"/api/v1/canvas-containers/{container.id}/").status_code, 403)
+
+        entity = Entity.objects.create(workspace=container.workspace, branch_id=container.branch_id, type="character", title="共享实体", content="共享内容")
+        reference = self.client.post("/api/v1/entity-canvas-references/", {"container": str(container.id), "entity": str(entity.id)}, format="json")
+        self.assertEqual(reference.status_code, 201, reference.data)
+        self.assertTrue(EntityCanvasReference.objects.filter(container=container, entity=entity).exists())
+        projection = self.client.get(f"/api/v1/canvas-containers/{container.id}/projection/")
+        self.assertTrue(any(node["entity_id"] == str(entity.id) for node in projection.data["nodes"]))
 
     def test_existing_entity_update_requires_review_and_preview(self):
         canvas = StagingCanvas.objects.get(pk=self.canvas_id)
