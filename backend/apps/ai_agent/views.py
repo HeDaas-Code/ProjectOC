@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from apps.accounts.permissions import membership, accessible_workspace_ids
 from apps.canvas.models import (
@@ -138,6 +138,12 @@ class SendDialogueMessageView(APIView):
 
 class DialogueToolView(APIView):
     """Small allowlisted copilot tools; formal facts are never written here."""
+    def get(self, request, session_id):
+        session = DialogueSession.objects.filter(id=session_id).first()
+        if not session or not membership(request.user, session.workspace):
+            return Response({"detail": "dialogue session not found"}, status=404)
+        return Response({"events": list((session.context or {}).get("copilot_events", []))})
+
     def post(self, request, session_id):
         session = DialogueSession.objects.select_related("workspace", "canvas", "canvas__branch").filter(id=session_id).first()
         if not session or not membership(request.user, session.workspace):
@@ -147,11 +153,21 @@ class DialogueToolView(APIView):
             return Response({"detail": "需要 editor 权限"}, status=403)
         tool = str(request.data.get("tool", ""))
         args = request.data.get("arguments") if isinstance(request.data.get("arguments"), dict) else {}
+        def record(status_value, result=None, error=None):
+            context = dict(session.context or {})
+            events = list(context.get("copilot_events", []))[-49:]
+            event = {"id": str(uuid4()), "tool": tool, "status": status_value, "arguments": args, "created_at": timezone.now().isoformat()}
+            if result is not None: event["result"] = result
+            if error is not None: event["error"] = error
+            events.append(event); context["copilot_events"] = events
+            session.context = context; session.save(update_fields=["context", "updated_at"])
+            return event
         if tool == "search_entities":
             query = str(args.get("query", "")).strip()
             rows = effective_entities(session.workspace, session.canvas.branch if session.canvas else None)
             rows = [row for row in rows if not query or query.lower() in f"{row.title}\n{row.content}".lower()][:50]
-            return Response({"tool": tool, "status": "completed", "result": [{"id": str(row.id), "title": row.title, "type": row.type, "content": row.content} for row in rows]})
+            result = [{"id": str(row.id), "title": row.title, "type": row.type, "content": row.content} for row in rows]
+            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)})
         if tool == "create_draft":
             if not session.canvas or session.canvas.purpose != StagingCanvas.Purpose.STAGING:
                 return Response({"detail": "副驾驶必须绑定灵感子画布"}, status=400)
@@ -159,9 +175,11 @@ class DialogueToolView(APIView):
             if not title:
                 return Response({"detail": "title is required"}, status=400)
             proposal = EntityProposal.objects.create(workspace=session.workspace, canvas=session.canvas, dialogue_session=session, source=EntityProposal.Source.AI, entity_type=str(args.get("entity_type", Entity.EntityType.FLOATING_TIP)), title=title, content=str(args.get("content", "")), metadata={"copilot_tool": tool})
-            return Response({"tool": tool, "status": "completed", "result": {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}}, status=201)
+            result = {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}
+            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)}, status=201)
         if tool == "consistency_check":
-            return Response({"tool": tool, "status": "completed", "result": build_consistency_report(session.workspace, session.canvas.branch if session.canvas else None)})
+            result = build_consistency_report(session.workspace, session.canvas.branch if session.canvas else None)
+            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)})
         return Response({"detail": "unknown or disallowed copilot tool"}, status=400)
 
 

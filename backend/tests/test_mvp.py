@@ -113,6 +113,9 @@ class MvpApiTests(TestCase):
         tool = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "create_draft", "arguments": {"title": "副驾驶草稿", "content": "待审核"}}, format="json")
         self.assertEqual(tool.status_code, 201, tool.data)
         self.assertTrue(EntityProposal.objects.filter(id=tool.data["result"]["proposal_id"], source="ai", status="pending").exists())
+        events = self.client.get(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/")
+        self.assertEqual(events.status_code, 200)
+        self.assertEqual(events.data["events"][-1]["tool"], "create_draft")
         denied = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "delete_everything", "arguments": {}}, format="json")
         self.assertEqual(denied.status_code, 400)
 
