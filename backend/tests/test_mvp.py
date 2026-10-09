@@ -5,6 +5,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityCanvasReference, EntityProposal, StagingCanvas
 from apps.core.models import CommitJob, Entity, Relation, WorldBranch, WorldWorkspace
+from apps.ai_agent.models import AgentRun, AgentToolCallAudit
 
 
 class MvpApiTests(TestCase):
@@ -112,6 +113,8 @@ class MvpApiTests(TestCase):
         self.assertEqual(session.status_code, 201)
         tool = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "create_draft", "arguments": {"title": "副驾驶草稿", "content": "待审核"}}, format="json")
         self.assertEqual(tool.status_code, 201, tool.data)
+        self.assertTrue(AgentRun.objects.filter(id=tool.data["run_id"], status=AgentRun.Status.COMPLETED).exists())
+        self.assertTrue(AgentToolCallAudit.objects.filter(run_id=tool.data["run_id"], tool_name="create_draft", status=AgentRun.Status.COMPLETED).exists())
         self.assertTrue(EntityProposal.objects.filter(id=tool.data["result"]["proposal_id"], source="ai", status="pending").exists())
         events = self.client.get(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/")
         self.assertEqual(events.status_code, 200)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from uuid import UUID, uuid4
 
 from apps.accounts.permissions import membership, accessible_workspace_ids
@@ -23,7 +24,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AgentEvidence, AgentRun
+from .models import AgentEvidence, AgentRun, AgentToolCallAudit
 from .providers import ModelInfo, ProviderError, configured_provider
 from .services.analysis import AgentBusyError, run_analysis
 from .services.dialogue import DialogueOrchestrator
@@ -167,6 +168,38 @@ class DialogueToolView(APIView):
             session.context = {**context, "copilot_events": events[-50:]}
             session.save(update_fields=["context", "updated_at"])
             return Response({"tool": tool, "status": "cancelled", "event": found})
+        run = AgentRun.objects.create(
+            workspace=session.workspace,
+            branch=session.canvas.branch if session.canvas else None,
+            dialogue_session=session,
+            canvas=session.canvas,
+            mode=AgentRun.Mode.MAINTENANCE,
+            status=AgentRun.Status.RUNNING,
+            model=session.model or "",
+            input_hash=hashlib.sha256(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest(),
+            created_by=request.user,
+        )
+        started_at = timezone.now()
+
+        def finish(run_status, result=None, error_code=""):
+            payload = result if result is not None else {"error": error_code}
+            elapsed = max(0, int((timezone.now() - started_at).total_seconds() * 1000))
+            run.status = run_status
+            run.output_json = payload if isinstance(payload, dict) else {"result": payload}
+            run.error_code = error_code
+            run.latency_ms = elapsed
+            run.completed_at = timezone.now()
+            run.save(update_fields=["status", "output_json", "error_code", "latency_ms", "completed_at"])
+            AgentToolCallAudit.objects.create(
+                run=run,
+                tool_name=tool,
+                arguments_hash=run.input_hash,
+                result_hash=hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest(),
+                status=run_status,
+                latency_ms=elapsed,
+                error_code=error_code,
+            )
+
         def record(status_value, result=None, error=None):
             context = dict(session.context or {})
             events = list(context.get("copilot_events", []))[-49:]
@@ -181,20 +214,26 @@ class DialogueToolView(APIView):
             rows = effective_entities(session.workspace, session.canvas.branch if session.canvas else None)
             rows = [row for row in rows if not query or query.lower() in f"{row.title}\n{row.content}".lower()][:50]
             result = [{"id": str(row.id), "title": row.title, "type": row.type, "content": row.content} for row in rows]
-            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)})
+            finish(AgentRun.Status.COMPLETED, {"result": result})
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)})
         if tool == "create_draft":
             if not session.canvas or session.canvas.purpose != StagingCanvas.Purpose.STAGING:
+                finish(AgentRun.Status.FAILED, error_code="staging_canvas_required")
                 return Response({"detail": "副驾驶必须绑定灵感子画布"}, status=400)
             title = str(args.get("title", "")).strip()
             if not title:
+                finish(AgentRun.Status.FAILED, error_code="title_required")
                 return Response({"detail": "title is required"}, status=400)
             proposal = EntityProposal.objects.create(workspace=session.workspace, canvas=session.canvas, dialogue_session=session, source=EntityProposal.Source.AI, entity_type=str(args.get("entity_type", Entity.EntityType.FLOATING_TIP)), title=title, content=str(args.get("content", "")), metadata={"copilot_tool": tool})
             result = {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}
-            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)}, status=201)
+            finish(AgentRun.Status.COMPLETED, result)
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)}, status=201)
         if tool == "consistency_check":
             result = build_consistency_report(session.workspace, session.canvas.branch if session.canvas else None)
-            return Response({"tool": tool, "status": "completed", "result": result, "event": record("completed", result)})
-        return Response({"detail": "unknown or disallowed copilot tool"}, status=400)
+            finish(AgentRun.Status.COMPLETED, result)
+            return Response({"tool": tool, "status": "completed", "run_id": str(run.id), "result": result, "event": record("completed", result)})
+        finish(AgentRun.Status.FAILED, error_code="unknown_tool")
+        return Response({"detail": "unknown or disallowed copilot tool", "run_id": str(run.id)}, status=400)
 
 
 class DialogueMemoryView(APIView):
