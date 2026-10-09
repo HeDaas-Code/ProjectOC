@@ -47,6 +47,24 @@ class StagingCanvas(models.Model):
         return self.name
 
 
+class CanvasContainer(models.Model):
+    """A stable, nested workspace container owning one editable canvas."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(WorldWorkspace, on_delete=models.CASCADE, related_name="canvas_containers")
+    branch = models.ForeignKey(WorldBranch, on_delete=models.CASCADE, null=True, blank=True, related_name="canvas_containers")
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children")
+    canvas = models.OneToOneField(StagingCanvas, on_delete=models.CASCADE, related_name="container")
+    name = models.CharField(max_length=200)
+    sort_order = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=StagingCanvas.Status.choices, default=StagingCanvas.Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name", "created_at"]
+        constraints = [models.UniqueConstraint(fields=["workspace", "parent", "name"], name="unique_container_name_under_parent")]
+
+
 class DialogueSession(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "活跃"

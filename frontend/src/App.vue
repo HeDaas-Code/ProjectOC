@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useWorkbench } from './stores/workbench'
 import { api } from './services/api'
 import { type Canvas, type Workspace } from './types'
 import CanvasSurface from './components/CanvasSurface.vue'
+import ContainerTree from './components/ContainerTree.vue'
+import EntityDrawer from './components/EntityDrawer.vue'
+import StyledDialog from './components/StyledDialog.vue'
+import ContainerProjection from './components/ContainerProjection.vue'
 import DialoguePanel from './components/DialoguePanel.vue'
 import ProposalPanel from './components/ProposalPanel.vue'
 import GraphPanel from './components/GraphPanel.vue'
@@ -28,6 +32,11 @@ const panel = ref('dialogue')
 const search = ref('')
 const showArchived = ref(false)
 const selectedId = ref('')
+const commandOpen = ref(false)
+const commandSearch = ref('')
+function commandKey(event: KeyboardEvent) { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); commandOpen.value = !commandOpen.value } }
+onMounted(() => window.addEventListener('keydown', commandKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', commandKey))
 const surface = ref<InstanceType<typeof CanvasSurface>>()
 const loading = ref(true)
 const mergeBranchId = ref('')
@@ -77,6 +86,9 @@ async function submitWorld(name: string) {
   } finally { worldBusy.value = false }
 }
 async function newCanvas() { if (!store.workspace) return; await run(async () => { await flush(); const c = await api<Canvas>('canvases/', 'POST', { workspace: store.workspace!.id, name: '新的灵感画布' }); store.canvases.unshift(c); await store.selectCanvas(c); tab.value = 'canvas' }) }
+async function newContainer(parent: string | null = null) { if (!store.workspace) return; const choice = await requestDialog({ title: '新建设定系', confirmLabel: '创建设定系', fields: [{ key: 'name', label: '设定系名称' }] }); if (!choice?.name?.trim()) return; await run(async () => { const container = await store.createContainer(choice.name.trim(), parent); if (container) { await flush(); await store.selectCanvas(await api<Canvas>(`canvases/${container.canvas}/`)); tab.value = 'canvas' } }) }
+async function openContainer(canvasId: string) { await run(async () => { await flush(); await store.selectCanvas(await api<Canvas>(`canvases/${canvasId}/`)); tab.value = 'canvas' }) }
+async function newEntityDraft() { if (!store.canvas || !store.workspace) return; const choice = await requestDialog({ title: '新建实体草稿', confirmLabel: '创建草稿', fields: [{ key: 'title', label: '实体名称' }, { key: 'content', label: '初始内容' }] }); if (!choice?.title?.trim()) return; await run(async () => { await api('proposals/', 'POST', { workspace: store.workspace!.id, canvas: store.canvas!.id, entity_type: 'canonical_setting', title: choice.title.trim(), content: choice.content || '' }); await store.refreshProposals(); panel.value = 'proposals'; tab.value = 'canvas' }) }
 async function chooseCanvas(c: Canvas) { if (store.sending) return; await run(async () => { await flush(); await store.selectCanvas(c); tab.value = 'canvas' }) }
 async function workspaceChange(e: Event) { await run(async () => { await flush(); await store.selectWorkspace(store.workspaces.find(w => w.id === (e.target as HTMLSelectElement).value)!); selectedId.value = ''; tab.value = 'canvas' }) }
 async function canvasAction(action: string) { if (!store.canvas) return; await run(async () => { await flush(); const c = store.canvas!; let result: Canvas
@@ -131,7 +143,7 @@ watch(() => [store.workspace?.id, authUser.value?.id], () => { void loadWorkspac
       <div class="brand"><span class="brand-mark">◈</span><div><strong>未定之书</strong><small>PROJECT OC · 世界观工作台</small></div></div>
       <div class="workspace-picker"><label class="eyebrow">当前世界</label><select :value="store.workspace?.id" @change="workspaceChange" :disabled="store.sending"><option v-if="!store.workspace" value="">选择或创建世界观</option><option v-for="w in store.workspaces" :key="w.id" :value="w.id">{{ w.name }}</option></select><button class="text-button" @click="newWorld" :disabled="store.sending">＋ 新建世界观</button></div>
       <nav><button :class="{ active: tab === 'canvas' }" @click="changeTab('canvas')">▧ 灵感暂存区 <small>{{ store.canvases.length }}</small></button><button :class="{ active: tab === 'graph' }" @click="changeTab('graph')">⌘ 世界观图谱</button><button :class="{ active: tab === 'timeline' }" @click="changeTab('timeline')">◷ 时间线</button><button :class="{ active: tab === 'history' }" @click="changeTab('history')">◷ 版本与维护</button><button v-if="canManageWorkspace && store.workspace" :class="{ active: tab === 'admin' }" @click="changeTab('admin')">⚙ 工作台管理</button></nav>
-      <div class="section-label"><span>我的画布</span><button @click="newCanvas" :disabled="!store.workspace || store.sending" aria-label="新建画布">＋</button></div><div class="canvas-list"><button v-for="c in store.canvases.filter(c => showArchived || c.status !== 'archived')" :key="c.id" :class="{ selected: c.id === store.canvas?.id }" @click="chooseCanvas(c)"><span>▤</span> {{ c.name }} <small v-if="c.status === 'archived'">归档</small></button></div><label class="archive-toggle"><input v-model="showArchived" type="checkbox"/> 显示归档</label><div class="section-label">正式实体 <span>{{ store.entities.length }}</span></div><input v-model="search" placeholder="搜索设定、人物、物品…" aria-label="搜索实体"/><div class="entity-list"><button v-for="e in entities" :key="e.id" @click="selectedId = e.id; changeTab('graph')">◇ {{ e.title }}</button><p v-if="!entities.length" class="muted">确认后的设定会出现在这里</p></div><footer><span class="status-dot"/> {{ authUser.username }}<button class="text-button" @click="signOut">退出</button><small>先容纳灵感，再建立秩序。</small></footer>
+      <div class="section-label"><span>我的画布</span><button @click="newCanvas" :disabled="!store.workspace || store.sending" aria-label="新建画布">＋</button></div><div class="canvas-list"><button v-for="c in store.canvases.filter(c => showArchived || c.status !== 'archived')" :key="c.id" :class="{ selected: c.id === store.canvas?.id }" @click="chooseCanvas(c)"><span>▤</span> {{ c.name }} <small v-if="c.status === 'archived'">归档</small></button></div><label class="archive-toggle"><input v-model="showArchived" type="checkbox"/> 显示归档</label><div class="section-label">设定系 <button @click="newContainer()" :disabled="!store.workspace || store.sending" aria-label="新建设定系">＋</button></div><ContainerTree :containers="store.containers" :active="store.canvas?.id" :can-edit="canEditWorkspace" @open="openContainer" @create="newContainer" /><div class="section-label">正式实体 <span>{{ store.entities.length }}</span><button @click="newEntityDraft" :disabled="!store.canvas || store.sending" aria-label="新建实体草稿">＋</button></div><input v-model="search" placeholder="搜索设定、人物、物品…" aria-label="搜索实体"/><div class="entity-list"><button v-for="e in entities" :key="e.id" @click="selectedId = e.id">◇ {{ e.title }}</button><p v-if="!entities.length" class="muted">确认后的设定会出现在这里</p></div><footer><span class="status-dot"/> {{ authUser.username }}<button class="text-button" @click="signOut">退出</button><small>先容纳灵感，再建立秩序。</small></footer>
     </aside>
     <main class="main">
       <header class="topbar"><div><span class="breadcrumb">{{ store.workspace?.name || '你的下一个世界' }} / {{ tab === 'canvas' ? '暂存区' : tab === 'graph' ? '图谱' : tab === 'timeline' ? '时间线' : tab === 'history' ? '版本' : '管理后台' }}</span><h1>{{ tab === 'canvas' ? store.canvas?.name || '让世界从这里生长' : tab === 'graph' ? '万物之间的联系' : tab === 'timeline' ? '角色与事件，沿着时间展开' : tab === 'history' ? '每一次选择，都有迹可循' : '管理你的私人工作台' }}</h1></div><div v-if="store.workspace && tab !== 'admin'" class="branch-controls"><label>工作分支 <select :value="store.branchKey" @change="changeBranch"><option value="main">main · 正式世界</option><option v-for="b in store.branches.filter(b => b.name !== 'main' && b.status === 'active')" :key="b.id" :value="b.id">{{ b.name }}</option></select></label><button @click="createBranch">＋ 分支</button><button v-if="store.branchKey !== 'main'" @click="mergeBranch">预览 / 合并</button><button v-if="store.branchKey !== 'main'" @click="archiveBranch">归档分支</button></div><div class="top-actions" v-if="store.canvas && tab === 'canvas'"><button @click="canvasAction('rename')">命名</button><button @click="canvasAction('duplicate')">复制</button><button @click="canvasAction('restore')">历史快照</button><button @click="canvasAction(store.canvas.status === 'archived' ? 'unarchive' : 'archive')">{{ store.canvas.status === 'archived' ? '取消归档' : '归档' }}</button><button class="primary" @click="panel = 'proposals'">审核提案 <span>{{ pending }}</span></button></div></header>
@@ -139,10 +151,22 @@ watch(() => [store.workspace?.id, authUser.value?.id], () => { void loadWorkspac
       <div v-if="store.error" class="error-banner" role="alert">{{ store.error }}<button @click="store.error = ''">关闭</button></div>
       <div v-if="loading" class="welcome"><h2>正在打开工作台…</h2></div><div v-else-if="!store.workspace" class="welcome"><span class="eyebrow">EVERY WORLD BEGINS WITH A QUESTION</span><h2>还没有名字的世界，<br/>也值得被认真记录。</h2><p>连接散落的灵感，推敲设定的逻辑，与 AI 一起寻找故事的可能。</p><button class="primary" @click="newWorld">创建第一个世界观 →</button></div>
       <div v-else-if="tab === 'admin' && canManageWorkspace" class="admin-page"><AdminPanel :workspace="store.workspace" :role="workspaceRole" @updated="store.workspace = $event" @error="store.error = $event" /></div>
-      <div v-else-if="tab === 'canvas'" class="workbench"><div class="canvas-column"><CanvasSurface v-if="store.canvas" :key="store.canvas.id" ref="surface" :canvas="store.canvas" :proposals="store.proposals" @saved="saved" @error="store.error = $event"/><div v-else class="welcome"><h2>给灵感一片空白</h2><button class="primary" @click="newCanvas">新建灵感画布</button></div></div><aside class="right-panel"><div class="panel-tabs"><button :class="{ active: panel === 'dialogue' }" @click="panel = 'dialogue'">✧ 产婆式对话</button><button :class="{ active: panel === 'proposals' }" @click="panel = 'proposals'">提案审核 <small>{{ pending }}</small></button></div><DialoguePanel v-show="panel === 'dialogue'"/><ProposalPanel v-show="panel === 'proposals'"/></aside></div>
+      <div v-else-if="tab === 'canvas'" class="workbench"><div class="canvas-column"><ContainerProjection v-for="container in store.containers.filter(c => c.status === 'active' && c.parent === (store.containers.find(x => x.canvas === store.canvas?.id)?.id || null))" :key="container.id" :container="container" @open="openContainer" @select="selectedId = $event" @error="store.error = $event" /><CanvasSurface v-if="store.canvas" :key="store.canvas.id" ref="surface" :canvas="store.canvas" :proposals="store.proposals" @saved="saved" @error="store.error = $event"/><div v-else class="welcome"><h2>给灵感一片空白</h2><button class="primary" @click="newCanvas">新建灵感画布</button></div></div><aside class="right-panel"><div class="panel-tabs"><button :class="{ active: panel === 'dialogue' }" @click="panel = 'dialogue'">✧ 产婆式对话</button><button :class="{ active: panel === 'proposals' }" @click="panel = 'proposals'">提案审核 <small>{{ pending }}</small></button></div><DialoguePanel v-show="panel === 'dialogue'"/><ProposalPanel v-show="panel === 'proposals'"/></aside></div>
       <TimelinePanel v-else-if="tab === 'timeline'" :key="store.workspace.id" :workspace="store.workspace.id" :branch="store.branchKey" :entities="store.entities" @error="store.error = $event" @focus-target="focusTimelineTarget"/><GraphPanel v-else-if="tab === 'graph'" :key="store.workspace.id" :workspace="store.workspace.id" :branch="store.branchKey" :revision="store.jobs.map(j => j.id).join()" :selected-id="selectedId" @error="store.error = $event"/><HistoryPanel v-else :key="`${store.workspace.id}:${store.branchKey}:${store.canvas?.id || 'none'}`" :branch="store.branchKey" :canvas="store.canvas?.id" :can-edit="canEditWorkspace" @focus-target="focusMaintenanceTarget"/>
     </main>
   </div>
+  <EntityDrawer v-if="selectedId && store.workspace" :id="selectedId" :workspace="store.workspace.id" :branch="store.branchKey" @close="selectedId = ''" @select="selectedId = $event" @error="store.error = $event" />
+  <StyledDialog :open="commandOpen" title="工作台命令 · Ctrl / ⌘ K" @close="commandOpen = false">
+    <input v-model="commandSearch" placeholder="搜索实体…" aria-label="命令搜索" />
+    <div class="actions">
+      <button :disabled="!canEditWorkspace" @click="commandOpen = false; newContainer()">新建设定系</button>
+      <button :disabled="!canEditWorkspace || !store.canvas" @click="commandOpen = false; newEntityDraft()">新建实体草稿</button>
+      <button @click="commandOpen = false; tab = 'canvas'; panel = 'proposals'">审核变更</button>
+      <button @click="commandOpen = false; tab = 'timeline'">时间线</button>
+      <button @click="commandOpen = false; tab = 'history'">版本与维护</button>
+    </div>
+    <div class="entity-list"><button v-for="entity in store.entities.filter(e => e.title.toLowerCase().includes(commandSearch.toLowerCase()))" :key="entity.id" @click="selectedId = entity.id; commandOpen = false">{{ entity.title }}</button></div>
+  </StyledDialog>
   <DialogHost />
   <CreateWorldDialog v-if="authUser" :open="creatingWorld" :busy="worldBusy" :error="worldError" :name-locked="Boolean(createdWorld)" @close="creatingWorld = false" @submit="submitWorld" />
 </template>

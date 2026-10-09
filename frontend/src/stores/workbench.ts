@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ApiError, api, consumeSSE, csrfHeader } from '../services/api'
-import type { Workspace, Branch, Canvas, Proposal, RelationProposal, Entity, Session, DialogueMemory, Job } from '../types'
+import type { Workspace, Branch, Canvas, CanvasContainer, Proposal, RelationProposal, Entity, Session, DialogueMemory, Job } from '../types'
 export const useWorkbench = defineStore('workbench', () => {
   const workspaces = ref<Workspace[]>([]), workspace = ref<Workspace>(), canvases = ref<Canvas[]>([]), canvas = ref<Canvas>()
   const proposals = ref<Proposal[]>([]), relations = ref<RelationProposal[]>([]), entities = ref<Entity[]>([]), session = ref<Session>(), memory = ref<DialogueMemory>()
-  const branches = ref<Branch[]>([]), branchKey = ref("main")
+  const branches = ref<Branch[]>([]), branchKey = ref("main"), containers = ref<CanvasContainer[]>([])
   const models = ref<{ id: string }[]>([]), jobs = ref<Job[]>([]), model = ref(''), error = ref(''), sending = ref(false), mode = ref(''), streamText = ref('')
   async function init() {
     workspaces.value = await api('workspaces/')
@@ -17,6 +17,7 @@ export const useWorkbench = defineStore('workbench', () => {
     workspace.value = w; localStorage.setItem('oc:workspace', w.id); canvas.value = undefined; session.value = undefined; memory.value = undefined; proposals.value = []; relations.value = []
     canvases.value = await api(`canvases/?workspace=${w.id}`)
     branches.value = await api(`branches/?workspace=${w.id}`)
+    containers.value = await api(`canvas-containers/?workspace=${w.id}&branch=main`)
     branchKey.value = "main"
     await refreshWorld()
     const first = canvases.value.find(c => c.status !== 'archived'); if (first) await selectCanvas(first)
@@ -79,7 +80,14 @@ export const useWorkbench = defineStore('workbench', () => {
   }
   async function selectBranch(key: string) {
     branchKey.value = key || "main"
+    if (workspace.value) containers.value = await api(`canvas-containers/?workspace=${workspace.value.id}&branch=${encodeURIComponent(branchKey.value)}`)
     await refreshWorld()
   }
-  return { workspaces, workspace, canvases, canvas, proposals, relations, entities, session, memory, jobs, branches, branchKey, models, model, error, sending, mode, streamText, init, selectWorkspace, selectCanvas, selectBranch, refreshBranches, refreshWorld, refreshProposals, refreshMemory, updateMemory, send }
+  async function createContainer(name: string, parent: string | null = null) {
+    if (!workspace.value) return
+    const created = await api<CanvasContainer>('canvas-containers/', 'POST', { workspace: workspace.value.id, branch: branchKey.value, parent, name })
+    containers.value = await api(`canvas-containers/?workspace=${workspace.value.id}&branch=${encodeURIComponent(branchKey.value)}`)
+    return created
+  }
+  return { workspaces, workspace, canvases, canvas, containers, proposals, relations, entities, session, memory, jobs, branches, branchKey, models, model, error, sending, mode, streamText, init, selectWorkspace, selectCanvas, selectBranch, refreshBranches, refreshWorld, refreshProposals, refreshMemory, updateMemory, createContainer, send }
 })

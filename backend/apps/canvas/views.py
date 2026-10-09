@@ -19,12 +19,13 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import (
     CanvasOperation,
+    CanvasContainer,
     CanvasRevision,
     CanvasSyncEvent,
     DialogueMessage,
@@ -39,6 +40,7 @@ from .serializers import (
     EntityProposalSerializer,
     RelationProposalSerializer,
     StagingCanvasSerializer,
+    CanvasContainerSerializer,
 )
 from .services.commit import CanvasCommitError, CanvasCommitService
 from .services.sync_ticket import issue_sync_ticket
@@ -69,6 +71,7 @@ class CanvasViewSet(viewsets.ModelViewSet):
         if self.request.query_params.get("workspace"):
             qs = qs.filter(workspace_id=self.request.query_params["workspace"])
         return qs
+
 
     @action(detail=False, methods=["post"], url_path="graph")
     def graph_canvas(self, request):
@@ -586,6 +589,103 @@ class CanvasViewSet(viewsets.ModelViewSet):
             raise ValidationError(str(exc))
         return Response({"job": CommitJobSerializer(job).data, "entities": EntitySerializer(entities, many=True).data, "relations": RelationSerializer(relations, many=True).data})
 
+
+class CanvasContainerViewSet(viewsets.ModelViewSet):
+    serializer_class = CanvasContainerSerializer
+    http_method_names: ClassVar[list[str]] = ["get", "post", "patch", "delete", "head", "options"]
+
+    @action(detail=True, methods=["get"])
+    def projection(self, request, pk=None):
+        """Read one level without connecting to or mutating the child room."""
+        container = self.get_object()
+        proposals = container.canvas.entity_proposals.select_related("created_entity").exclude(status__in=["rejected", "superseded"])
+        return Response({
+            "container": self.get_serializer(container).data,
+            "version": container.canvas.snapshot_version,
+            "children": self.get_serializer(container.children.filter(status="active"), many=True).data,
+            "nodes": [{"id": str(p.id), "entity_id": str(p.created_entity_id) if p.created_entity_id else None,
+                       "title": p.created_entity.title if p.created_entity_id else p.title,
+                       "content": p.created_entity.content if p.created_entity_id else p.content,
+                       "type": p.entity_type, "status": p.status} for p in proposals],
+            "edges": RelationProposalSerializer(container.canvas.relation_proposals.exclude(status="rejected"), many=True).data,
+        })
+
+    def get_queryset(self):
+        qs = CanvasContainer.objects.select_related("workspace", "branch", "canvas").filter(
+            workspace_id__in=accessible_workspace_ids(self.request.user)
+        )
+        if self.request.query_params.get("workspace"):
+            qs = qs.filter(workspace_id=self.request.query_params["workspace"])
+        if self.request.query_params.get("branch"):
+            key = self.request.query_params["branch"]
+            from uuid import UUID
+            try:
+                branch_id = UUID(key)
+            except ValueError:
+                qs = qs.filter(branch__name=key)
+            else:
+                qs = qs.filter(branch_id=branch_id)
+        return qs
+
+    def _member(self, workspace):
+        member = membership(self.request.user, workspace)
+        if not member:
+            raise ValidationError("无权访问该世界观")
+        if self.request.method != "GET" and member.role == "reader":
+            raise PermissionDenied("需要 editor 权限")
+        return member
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        workspace = WorldWorkspace.objects.select_for_update().filter(
+            id=serializer.validated_data["workspace"].id,
+            id__in=accessible_workspace_ids(self.request.user),
+        ).first()
+        if not workspace:
+            raise ValidationError("世界观不存在")
+        self._member(workspace)
+        branch_key = str(self.request.data.get("branch") or "main")
+        from apps.core.views import _find_branch
+        branch = _find_branch(workspace, branch_key, active_only=True)
+        if not branch:
+            raise ValidationError("分支不存在")
+        parent = serializer.validated_data.get("parent")
+        if parent and (parent.workspace_id != workspace.id or parent.branch_id != branch.id):
+            raise ValidationError("父容器必须属于同一世界观和分支")
+        canvas = StagingCanvas.objects.create(
+            workspace=workspace, branch=branch, name=serializer.validated_data["name"],
+            purpose=StagingCanvas.Purpose.STAGING, snapshot={},
+        )
+        CanvasRevision.objects.create(canvas=canvas, version=canvas.snapshot_version, snapshot=canvas.snapshot, sync_metadata={})
+        serializer.save(workspace=workspace, branch=branch, canvas=canvas)
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        WorldWorkspace.objects.select_for_update().get(pk=serializer.instance.workspace_id)
+        serializer.instance.refresh_from_db()
+        self._member(serializer.instance.workspace)
+        if "workspace" in serializer.validated_data and serializer.validated_data["workspace"].id != serializer.instance.workspace_id:
+            raise ValidationError("容器不能跨世界观移动")
+        parent = serializer.validated_data.get("parent", serializer.instance.parent)
+        if parent:
+            parent = CanvasContainer.objects.get(pk=parent.pk)
+        seen = {serializer.instance.id}
+        cursor = parent
+        while cursor is not None:
+            if cursor.id in seen:
+                raise ValidationError("容器不能形成循环嵌套")
+            seen.add(cursor.id)
+            cursor = cursor.parent
+        if parent and (parent.workspace_id != serializer.instance.workspace_id or parent.branch_id != serializer.instance.branch_id):
+            raise ValidationError("父容器无效")
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        container = self.get_object()
+        self._member(container.workspace)
+        container.status = StagingCanvas.Status.ARCHIVED
+        container.save(update_fields=["status", "updated_at"])
+        return Response(status=204)
 
 class EntityProposalViewSet(viewsets.ModelViewSet):
     serializer_class = EntityProposalSerializer

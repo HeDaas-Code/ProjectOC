@@ -1,6 +1,16 @@
 from rest_framework import serializers
 from apps.core.models import Entity, Relation
-from .models import DialogueMessage, DialogueSession, EntityProposal, RelationProposal, StagingCanvas
+from .models import CanvasContainer, DialogueMessage, DialogueSession, EntityProposal, RelationProposal, StagingCanvas
+
+
+class CanvasContainerSerializer(serializers.ModelSerializer):
+    children = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    canvas_name = serializers.CharField(source="canvas.name", read_only=True)
+
+    class Meta:
+        model = CanvasContainer
+        fields = ["id", "workspace", "branch", "parent", "canvas", "canvas_name", "name", "sort_order", "status", "children", "created_at", "updated_at"]
+        read_only_fields = ["id", "branch", "canvas", "canvas_name", "children", "created_at", "updated_at"]
 
 
 class StagingCanvasSerializer(serializers.ModelSerializer):

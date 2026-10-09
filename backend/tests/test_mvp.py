@@ -3,7 +3,7 @@ from pathlib import Path
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from apps.canvas.models import CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityProposal, StagingCanvas
+from apps.canvas.models import CanvasContainer, CanvasOperation, DialogueMemory, DialogueMemoryAudit, EntityProposal, StagingCanvas
 from apps.core.models import CommitJob, Entity, Relation, WorldBranch, WorldWorkspace
 
 
@@ -45,6 +45,42 @@ class MvpApiTests(TestCase):
         self.assertEqual(Relation.objects.filter(branch=None).count(), 0)
         invalid = self.client.post(url + "/graph-preview/", {"relation_proposal_ids": []}, format="json")
         self.assertEqual(invalid.status_code, 400)
+
+    def test_canvas_container_creates_child_canvas_and_rejects_reader(self):
+        created = self.client.post("/api/v1/canvas-containers/", {
+            "workspace": self.workspace_id, "branch": "main", "name": "魔法体系",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        container = CanvasContainer.objects.get(pk=created.data["id"])
+        self.assertEqual(container.canvas.purpose, StagingCanvas.Purpose.STAGING)
+        child = self.client.post("/api/v1/canvas-containers/", {
+            "workspace": self.workspace_id, "branch": "main", "parent": str(container.id), "name": "星辰魔法",
+        }, format="json")
+        self.assertEqual(child.status_code, 201, child.data)
+        self.assertEqual(str(child.data["parent"]), str(container.id))
+        listed = self.client.get(f"/api/v1/canvas-containers/?workspace={self.workspace_id}&branch=main")
+        self.assertEqual(listed.status_code, 200)
+        self.assertTrue(any(row["id"] == str(container.id) for row in listed.data))
+        cycle = self.client.patch(f"/api/v1/canvas-containers/{container.id}/", {"parent": child.data["id"]}, format="json")
+        self.assertEqual(cycle.status_code, 400)
+        container.refresh_from_db()
+        self.assertIsNone(container.parent_id)
+        before = container.canvas.snapshot_version
+        projection = self.client.get(f"/api/v1/canvas-containers/{container.id}/projection/")
+        self.assertEqual(projection.status_code, 200, projection.data)
+        self.assertEqual(len(projection.data["children"]), 1)
+        container.canvas.refresh_from_db()
+        self.assertEqual(container.canvas.snapshot_version, before)
+        from django.contrib.auth import get_user_model
+        from apps.accounts.models import WorkspaceMembership
+        reader = get_user_model().objects.create_user(username="container-reader", password="reader-password")
+        WorkspaceMembership.objects.create(workspace_id=self.workspace_id, user=reader, role="reader")
+        client = APIClient()
+        client.force_authenticate(reader)
+        self.assertEqual(client.get(f"/api/v1/canvas-containers/{container.id}/projection/").status_code, 200)
+        self.assertEqual(client.patch(f"/api/v1/canvas-containers/{container.id}/", {"name": "禁止"}, format="json").status_code, 403)
+        self.assertEqual(client.delete(f"/api/v1/canvas-containers/{container.id}/").status_code, 403)
+
 
     def tearDown(self):
         self.settings_override.disable()
