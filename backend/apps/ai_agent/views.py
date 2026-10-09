@@ -13,6 +13,7 @@ from apps.canvas.models import (
     StagingCanvas,
 )
 from apps.core.models import Entity, WorldBranch, WorldWorkspace
+from apps.core.services.branching import effective_entities
 from apps.core.services.consistency import build_consistency_report
 from django.conf import settings
 from django.db import transaction
@@ -133,6 +134,35 @@ class SendDialogueMessageView(APIView):
         response["X-Accel-Buffering"] = "no"
         response["X-Content-Type-Options"] = "nosniff"
         return response
+
+
+class DialogueToolView(APIView):
+    """Small allowlisted copilot tools; formal facts are never written here."""
+    def post(self, request, session_id):
+        session = DialogueSession.objects.select_related("workspace", "canvas", "canvas__branch").filter(id=session_id).first()
+        if not session or not membership(request.user, session.workspace):
+            return Response({"detail": "dialogue session not found"}, status=404)
+        member = membership(request.user, session.workspace)
+        if member.role == "reader":
+            return Response({"detail": "需要 editor 权限"}, status=403)
+        tool = str(request.data.get("tool", ""))
+        args = request.data.get("arguments") if isinstance(request.data.get("arguments"), dict) else {}
+        if tool == "search_entities":
+            query = str(args.get("query", "")).strip()
+            rows = effective_entities(session.workspace, session.canvas.branch if session.canvas else None)
+            rows = [row for row in rows if not query or query.lower() in f"{row.title}\n{row.content}".lower()][:50]
+            return Response({"tool": tool, "status": "completed", "result": [{"id": str(row.id), "title": row.title, "type": row.type, "content": row.content} for row in rows]})
+        if tool == "create_draft":
+            if not session.canvas or session.canvas.purpose != StagingCanvas.Purpose.STAGING:
+                return Response({"detail": "副驾驶必须绑定灵感子画布"}, status=400)
+            title = str(args.get("title", "")).strip()
+            if not title:
+                return Response({"detail": "title is required"}, status=400)
+            proposal = EntityProposal.objects.create(workspace=session.workspace, canvas=session.canvas, dialogue_session=session, source=EntityProposal.Source.AI, entity_type=str(args.get("entity_type", Entity.EntityType.FLOATING_TIP)), title=title, content=str(args.get("content", "")), metadata={"copilot_tool": tool})
+            return Response({"tool": tool, "status": "completed", "result": {"proposal_id": str(proposal.id), "status": proposal.status, "requires_review": True}}, status=201)
+        if tool == "consistency_check":
+            return Response({"tool": tool, "status": "completed", "result": build_consistency_report(session.workspace, session.canvas.branch if session.canvas else None)})
+        return Response({"detail": "unknown or disallowed copilot tool"}, status=400)
 
 
 class DialogueMemoryView(APIView):

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AgentAnalysisView, AgentEvidenceView, AgentRunView, AgentRunEventsView, AgentCancelView, DialogueMemoryView, MaintenanceProposalView, MaintenanceReviewView, ProviderListView, ProviderModelsView, SendDialogueMessageView
+from .views import AgentAnalysisView, AgentEvidenceView, AgentRunView, AgentRunEventsView, AgentCancelView, DialogueMemoryView, DialogueToolView, MaintenanceProposalView, MaintenanceReviewView, ProviderListView, ProviderModelsView, SendDialogueMessageView
 
 urlpatterns = [
     path("workspaces/<uuid:workspace_id>/maintenance-review/", MaintenanceReviewView.as_view(), name="maintenance-review"),
@@ -7,6 +7,7 @@ urlpatterns = [
     path("ai/providers/", ProviderListView.as_view(), name="ai-providers"),
     path("ai/providers/<str:provider_id>/models/", ProviderModelsView.as_view(), name="ai-provider-models"),
     path("dialogue/sessions/<uuid:session_id>/messages/", SendDialogueMessageView.as_view(), name="send-dialogue-message"),
+    path("dialogue/sessions/<uuid:session_id>/tools/", DialogueToolView.as_view(), name="dialogue-tools"),
     path("dialogue/sessions/<uuid:session_id>/memory/", DialogueMemoryView.as_view(), name="dialogue-memory"),
     path("dialogue/sessions/<uuid:session_id>/analysis/", AgentAnalysisView.as_view(), name="agent-analysis"),
     path("agent/runs/<uuid:run_id>/", AgentRunView.as_view(), name="agent-run"),

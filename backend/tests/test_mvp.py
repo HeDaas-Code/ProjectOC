@@ -107,6 +107,15 @@ class MvpApiTests(TestCase):
         self.assertEqual(entity.title, "新名")
         self.assertEqual(entity.content, "新内容")
 
+    def test_copilot_tools_search_and_draft_are_allowlisted(self):
+        session = self.client.post(f"/api/v1/dialogue/sessions/", {"workspace": self.workspace_id, "canvas": self.canvas_id, "model": "fallback-model"}, format="json")
+        self.assertEqual(session.status_code, 201)
+        tool = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "create_draft", "arguments": {"title": "副驾驶草稿", "content": "待审核"}}, format="json")
+        self.assertEqual(tool.status_code, 201, tool.data)
+        self.assertTrue(EntityProposal.objects.filter(id=tool.data["result"]["proposal_id"], source="ai", status="pending").exists())
+        denied = self.client.post(f"/api/v1/dialogue/sessions/{session.data['id']}/tools/", {"tool": "delete_everything", "arguments": {}}, format="json")
+        self.assertEqual(denied.status_code, 400)
+
 
     def tearDown(self):
         self.settings_override.disable()
