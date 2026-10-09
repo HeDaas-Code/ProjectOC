@@ -18,7 +18,15 @@ const noteInput = ref('')
 const auditOpen = ref(false)
 const activeView = ref<'dialogue' | 'memory' | 'analysis' | 'tools'>('dialogue')
 const copilotEvents = ref<any[]>([])
-async function loadCopilotEvents() { if (!store.session) return; try { copilotEvents.value = (await api<{ events: any[] }>(`dialogue/sessions/${store.session.id}/tools/`)).events } catch (error) { store.error = String(error) } }
+const copilotRuns = ref<any[]>([])
+async function loadCopilotEvents() {
+  if (!store.session) return
+  try {
+    const payload = await api<{ events: any[]; runs?: any[] }>(`dialogue/sessions/${store.session.id}/tools/`)
+    copilotEvents.value = payload.events
+    copilotRuns.value = payload.runs || []
+  } catch (error) { store.error = String(error) }
+}
 const analysisMode = ref<'consistency' | 'timeline'>('consistency')
 const analysisRun = ref<AgentRun>()
 const analysisFindings = ref<AgentFinding[]>([])
@@ -294,8 +302,14 @@ function askEvidence(evidence: AgentEvidence) {
 
     <section v-else-if="activeView === 'tools'" class="copilot-events" aria-label="副驾驶工具记录">
       <div class="panel-heading"><span class="eyebrow">COPILOT AUDIT</span><h2>副驾驶工具记录</h2><p>工具只能创建待审核草稿，不能直接修改正式实体。</p></div>
+      <article v-for="run in copilotRuns" :key="`run-${run.id}`" class="copilot-event copilot-run">
+        <header><strong>运行 {{ run.id.slice(0, 8) }}</strong><small>{{ new Date(run.created_at).toLocaleString() }}</small></header>
+        <span :class="`run-status run-${run.status}`">{{ run.status }}</span>
+        <small v-if="run.error_code">错误：{{ run.error_code }}</small>
+        <ul v-if="run.tool_calls?.length"><li v-for="call in run.tool_calls" :key="`${run.id}-${call.tool_name}`">{{ call.tool_name }} · {{ call.status }} · {{ call.latency_ms }}ms</li></ul>
+      </article>
       <article v-for="event in copilotEvents" :key="event.id" class="copilot-event"><header><strong>{{ event.tool }}</strong><small>{{ new Date(event.created_at).toLocaleString() }}</small></header><span>{{ event.status }}</span><pre>{{ JSON.stringify(event.arguments, null, 2) }}</pre></article>
-      <p v-if="!copilotEvents.length" class="muted">暂无工具调用记录。</p>
+      <p v-if="!copilotEvents.length && !copilotRuns.length" class="muted">暂无工具调用记录。</p>
     </section>
 
     <section
