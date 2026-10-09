@@ -30,6 +30,7 @@
 - **Redis**：官方同步房间的跨实例租约协调，不保存领域事实。
 - **同步 SQLite**：官方房间的协议 journal/cache。恢复时与 PostgreSQL 的 clock/hash 对账，必要时回放事件或重建。
 - **本地开发 SQLite**：未设置 PostgreSQL `DATABASE_URL` 时的 Django 开发回退，不等同于同步服务的 SQLite。
+- **AI 副驾驶工具**：`POST /dialogue/sessions/<id>/tools/` 只允许检索实体、创建待审核草稿和运行一致性检查；`GET` 同一路径返回最近 50 条工具事件。工具事件写入对话上下文用于审计，AI 不能直接修改正式实体。
 
 ## 画布同步
 
