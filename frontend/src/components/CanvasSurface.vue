@@ -75,6 +75,10 @@ function undo() {
 function redo() {
   if (canEdit.value) adapter!.redo();
 }
+function arrangeGrid() {
+  if (!canEdit.value) return emit("error", "当前画布为只读");
+  adapter!.arrangeGrid();
+}
 function exportLocal() {
   const a = document.createElement("a");
   const url = URL.createObjectURL(
@@ -136,6 +140,7 @@ defineExpose({ flush: async () => {
         ><button :disabled="isReadOnly" @click="openEditor('mermaid')">
           ◇ 图表 / 思维导图</button
         ><button :disabled="isReadOnly" @click="editSelected">编辑卡片</button
+        ><button :disabled="isReadOnly" @click="arrangeGrid">整理布局</button
         ><button :disabled="isReadOnly" @click="undo" aria-label="撤销">
           ↶</button
         ><button :disabled="isReadOnly" @click="redo" aria-label="重做">

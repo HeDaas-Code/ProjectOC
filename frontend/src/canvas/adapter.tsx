@@ -51,6 +51,7 @@ function MermaidContent({ text }: { text: string }) {
 export interface CanvasAdapter {
   loadSnapshot(snapshot: unknown): void; getSnapshot(): unknown; createDraftElement(data: Proposal): string
   updateElement(id: string, data: unknown): void; deleteElement(id: string): void; undo(): void; redo(): void
+  arrangeGrid(columns?: number): void
 }
 export class TldrawAdapter implements CanvasAdapter {
   constructor(public editor: Editor) {}
@@ -68,6 +69,10 @@ export class TldrawAdapter implements CanvasAdapter {
   deleteElement(id: string) { this.editor.deleteShape(id as TLShapeId) }
   undo() { this.editor.undo() }
   redo() { this.editor.redo() }
+  arrangeGrid(columns = 4) {
+    const shapes = this.editor.getCurrentPageShapes()
+    shapes.forEach((shape, index) => this.editor.updateShape({ id: shape.id, type: shape.type, x: (index % columns) * 280, y: Math.floor(index / columns) * 180 }))
+  }
   addCard(kind: string, text: string) {
     const center = this.editor.getViewportPageBounds().center
     this.editor.createShape<Card>({ type: 'oc-card', x: center.x - 145, y: center.y - 105, props: { w: 290, h: 210, kind, text, proposalId: '' } })
