@@ -163,6 +163,14 @@ class DialogueToolView(APIView):
                 return Response({"detail": "copilot event not found"}, status=404)
             if found.get("status") == "completed":
                 return Response({"detail": "已完成的工具不能取消"}, status=409)
+            run_id = found.get("run_id")
+            if run_id:
+                run = AgentRun.objects.filter(id=run_id, dialogue_session=session).first()
+                if run and run.status in {AgentRun.Status.QUEUED, AgentRun.Status.RUNNING}:
+                    run.status = AgentRun.Status.CANCELLED
+                    run.completed_at = timezone.now()
+                    run.error_code = "cancelled_by_user"
+                    run.save(update_fields=["status", "completed_at", "error_code"])
             found["status"] = "cancelled"
             found["cancelled_at"] = timezone.now().isoformat()
             session.context = {**context, "copilot_events": events[-50:]}
@@ -203,7 +211,7 @@ class DialogueToolView(APIView):
         def record(status_value, result=None, error=None):
             context = dict(session.context or {})
             events = list(context.get("copilot_events", []))[-49:]
-            event = {"id": str(uuid4()), "tool": tool, "status": status_value, "arguments": args, "created_at": timezone.now().isoformat()}
+            event = {"id": str(uuid4()), "run_id": str(run.id), "tool": tool, "status": status_value, "arguments": args, "created_at": timezone.now().isoformat()}
             if result is not None: event["result"] = result
             if error is not None: event["error"] = error
             events.append(event); context["copilot_events"] = events
