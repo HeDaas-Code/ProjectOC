@@ -25,6 +25,7 @@ from .services.branching import (
 )
 from apps.version_control.services.git_sync import GitRepositoryService
 from apps.ai_agent.providers import ProviderError, configured_provider
+from apps.canvas.models import CanvasContainer, EntityCanvasReference, StagingCanvas
 
 
 def _find_branch(workspace, key, *, active_only=False):
@@ -706,6 +707,25 @@ class WorldBranchViewSet(viewsets.ModelViewSet):
                             participation.save(update_fields=["entity",])
                     branch_entry.save(update_fields=["timeline", "event", "branch", "updated_at"])
 
+            # Containers and references are branch-scoped layout metadata. They
+            # have stable identities, so merge promotes them in place after
+            # semantic entity ids have been mapped to main. This keeps nested
+            # parent links and canvas layouts intact without copying snapshots.
+            branch_containers = list(CanvasContainer.objects.select_for_update().filter(branch=branch).order_by("created_at"))
+            for container in branch_containers:
+                container.branch = None
+                container.canvas.branch = None
+                container.canvas.save(update_fields=["branch", "updated_at"])
+                container.save(update_fields=["branch", "updated_at"])
+            for reference in EntityCanvasReference.objects.select_for_update().filter(branch=branch):
+                mapped_entity = entity_to_main.get(reference.entity_id, reference.entity_id)
+                if mapped_entity not in promoted:
+                    reference.delete()
+                    continue
+                reference.entity_id = mapped_entity
+                reference.branch = None
+                reference.save(update_fields=["entity", "branch"])
+
             branch.status = WorldBranch.Status.MERGED
             branch.merged_at = timezone.now()
             branch.save(update_fields=["status", "merged_at", "updated_at"])
@@ -1055,6 +1075,12 @@ def _branch_merge_preview(branch):
         entry["participants"] = list(
             TimelineParticipation.objects.filter(entry_id=entry["id"]).order_by("entity_id").values("entity_id", "role")
         )
+    container_changes = list(CanvasContainer.objects.filter(branch=branch).order_by("created_at").values(
+        "id", "parent_id", "canvas_id", "name", "sort_order", "status"
+    ))
+    reference_changes = list(EntityCanvasReference.objects.filter(branch=branch).order_by("created_at").values(
+        "id", "container_id", "entity_id"
+    ))
     import hashlib
     import json
     body = {
@@ -1065,6 +1091,8 @@ def _branch_merge_preview(branch):
         "conflicts": conflicts,
         "lifespan_overrides": lifespan_overrides,
         "timeline_overrides": entry_overrides,
+        "container_changes": container_changes,
+        "reference_changes": reference_changes,
     }
     token = hashlib.sha256(
         json.dumps(body, sort_keys=True, default=str, ensure_ascii=False).encode()
