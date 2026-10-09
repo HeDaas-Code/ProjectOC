@@ -57,6 +57,9 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 前端默认代理本机 8000 端口。后端与同步服务须使用一致的 `SYNC_TICKET_SECRET`、`SYNC_INTERNAL_SECRET`；最小启动使用各自代码中匹配的开发默认值。不要直接加载容器用 `.env` 后混用 `backend`、`redis` 等 Docker 内部主机名。
 
+嵌套控制台默认开启。迁移或回退旧导航时，可在前端构建环境设置
+`VITE_NESTED_CONSOLE=false`；该开关只隐藏只读容器投影，不删除容器、引用、提案或画布数据，重新设置为 `true` 即可恢复。
+
 终端四，处理 Git 和图谱后台任务：
 
 ```bash
